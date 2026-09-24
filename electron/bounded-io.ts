@@ -1,4 +1,5 @@
 import { open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 export const MAX_BYTES = 64 * 1024 * 1024;
 /** LF-delimited UTF-8, bounded before concatenation or decoding. */
 export class JsonlDecoder {
@@ -21,7 +22,7 @@ export class JsonlDecoder {
   }
 }
 export async function readBoundedFile(path: string, maxBytes = MAX_BYTES): Promise<string> {
-  const file = await open(path, 'r');
+  const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
     const stat = await file.stat();
     if (!stat.isFile()) throw new Error('Transcript must be a regular file.');

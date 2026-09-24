@@ -4,6 +4,8 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { JsonlDecoder, readBoundedFile } from '../electron/bounded-io.js';
 import { DaemonTransport } from '../electron/transport.js';
 import { parseSavedTranscript } from '../electron/prime.js';
@@ -30,4 +32,11 @@ test('scalar and malformed daemon records fail connection without crashing', asy
     try { await assert.rejects(client.connect(), /Invalid/); }
     finally { client.close(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
   }
+});
+
+
+test('FIFO transcript is rejected without waiting for a writer', { skip: process.platform === 'win32', timeout: 2000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'fifo-')); const fifo = join(dir, 'transcript');
+  try { await promisify(execFile)('mkfifo', [fifo]); await assert.rejects(readBoundedFile(fifo), /regular file/); }
+  finally { await rm(dir, { recursive: true, force: true }); }
 });
