@@ -54,7 +54,7 @@ test('saved transcript follows final branch and tolerates only an incomplete tra
     { type: 'message', id: 'c', parentId: 'a', message: { role: 'assistant', content: 'Current answer' } },
     { type: 'session_info', id: 'd', parentId: 'c', name: 'Title' },
   ];
-  assert.deepEqual(parseSavedTranscript(records.map(JSON.stringify).join('\n') + '\n{"').map(m => m.content), ['Question', 'Current answer']);
+  assert.deepEqual(parseSavedTranscript(records.map(record => JSON.stringify(record)).join('\n') + '\n{"').map(m => m.content), ['Question', 'Current answer']);
   assert.throws(() => parseSavedTranscript('{broken}\n{}\n'), /invalid JSON/);
 });
 

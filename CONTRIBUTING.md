@@ -35,3 +35,15 @@ Preserve resident-session behavior: closing the app must not stop the daemon.
 
 Contributions are provided under the repository's MIT license. Bundled fonts
 retain their respective SIL Open Font License notices.
+
+## Toolchain and restarts
+
+Use `.nvmrc` (Node 22, minimum 22.12) and the npm version in `packageManager`.
+`npm run typecheck` includes tests and Playwright configuration. Install browser
+binaries with `npx playwright install chromium` before UI tests.
+
+Electron 44 downloads its native runtime lazily. `npm run notices` ensures that
+runtime is installed before reading its license files; no GUI or daemon is started.
+Restart `npm run dev` after edits in `electron/` (main/preload compilation happens
+once at startup). Renderer changes use Vite hot reload. This is intentional to avoid
+restarting native windows and discarding unsent drafts unexpectedly.

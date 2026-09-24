@@ -283,7 +283,10 @@ space stable or make validation/closing behavior explicit. Add visible feedback 
 workspace/model preference save failures (currently swallowed), consistent with the
 appearance settings storage warning.
 
-### [ ] 16. Type-check tests and standardize development tooling
+### [x] 16. Type-check tests and standardize development tooling
+
+**Implementation:** Typecheck now includes tests/Playwright; fixed JSON.stringify callback type error. Added Node engine/.nvmrc and tested npm metadata; documented Electron restart behavior. Explicit Electron runtime installation precedes notice generation, fixing the clean CI missing-license failure.
+
 
 Tests and `playwright.config.ts` are excluded from current tsconfigs. An explicit
 test typecheck finds TS2345 at `tests/prime.test.ts:106` (`records.map(JSON.stringify)`);

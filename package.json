@@ -11,17 +11,18 @@
     "build": "npm run notices && tsc --noEmit && vite build && tsc -p tsconfig.electron.json",
     "start": "electron .",
     "test": "tsx --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.tests.json",
     "package": "npm run check && npm run build && electron-builder --dir",
     "dist": "npm run check && npm run build && electron-builder",
     "smoke": "npm run build && node scripts/smoke.mjs",
     "test:ui": "playwright test",
-    "notices": "node scripts/generate-notices.mjs",
+    "notices": "npm run electron:install && node scripts/generate-notices.mjs",
     "notices:check": "node scripts/generate-notices.mjs --check",
     "package:check": "node scripts/check-package.mjs",
     "test:notices": "node --test tests/notices.test.mjs",
     "test:electron": "npm run build && node scripts/test-electron.mjs",
-    "check": "npm run typecheck && npm test && npm run test:notices && npm run test:ui"
+    "check": "npm run typecheck && npm test && npm run test:notices && npm run test:ui",
+    "electron:install": "node node_modules/electron/install.js"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -96,5 +97,9 @@
   "bugs": {
     "url": "https://github.com/vedssharma/prime-desktop/issues"
   },
-  "homepage": "https://github.com/vedssharma/prime-desktop#readme"
+  "homepage": "https://github.com/vedssharma/prime-desktop#readme",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "npm@10.9.8"
 }
