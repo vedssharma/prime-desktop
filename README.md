@@ -42,17 +42,16 @@ open "release/mac-arm64/Session Dock.app"
 
 The renamed app uses a new application ID and local preferences profile. Existing CLI sessions are unchanged; you may need to select your workspace and model again. Internal `PRIME_DESKTOP_*` environment variables remain supported for compatibility.
 
-Closing the window does not stop agent work. Use Stop in a session to interrupt it. Deleting a session stops its worker and removes its shared CLI history, not just the desktop entry.
+Closing the window does not stop agent work. Use the CLI to stop or delete sessions while the desktop is in read-only compatibility mode.
 
 ## What it does
 
 - Browse and search existing Prime Agent sessions.
-- Start a session in a chosen workspace with the configured default model or an available model.
 - Read conversations, Markdown responses, and tool output.
-- Send prompts, queue follow-ups while an agent works, and stop current work.
+- Copy responses through a validated native clipboard bridge.
 - Keep separate unsent drafts for each session while the app is open.
 - Remember the last workspace and model selection across launches.
-- Rename and delete sessions with confirmation.
+- Configure appearance, readability, and connection paths without changing CLI state.
 - Keep resident sessions running when the app closes, so you can return from the desktop or CLI.
 
 ## Appearance
@@ -72,7 +71,7 @@ These are desktop-only settings and do not change the CLI's theme.
 
 Drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. Only the new-session workspace path, model choice, and appearance settings are stored locally.
 
-During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
+The following workflow is retained for future identity-safe backends and tested with simulated sessions; it is disabled on the current daemon. During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
 
 ## Architecture
 
@@ -90,7 +89,7 @@ This is an initial desktop companion, not complete CLI feature parity. Login, pr
 
 Local development and unsigned packaging are supported. Signed/notarized public distribution needs platform signing credentials and release setup. The integration targets Prime Agent 0.9.5 with daemon protocol 7 / schema 28 or newer. Other protocol versions fail with an explicit compatibility error; future protocol changes may need an adapter update.
 
-For nonstandard installations, set `PRIME_AGENT_BIN` to the CLI executable and `PRIME_DESKTOP_SOCKET` to the public daemon socket path. The default socket discovery currently targets macOS and Linux. Windows packaging is scaffolded, but Windows daemon transport is not supported yet. Saved transcripts larger than 64 MiB must be opened in the CLI.
+For nonstandard installations, set `PRIME_AGENT_BIN` to the CLI executable and `PRIME_DESKTOP_SOCKET` to the public daemon socket path. The default socket discovery currently targets macOS and Linux. Windows is unsupported and no Windows installer is offered. Saved transcripts larger than 64 MiB must be opened in the CLI.
 
 ## Contributing
 
@@ -100,7 +99,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development and test instructions.
 
 MIT — see [LICENSE](LICENSE). Bundled DM Sans and Space Grotesk fonts are
 licensed under the SIL Open Font License; notices are in `public/licenses/`.
-Dependency licenses remain with their respective packages.
+Dependency notices ship in `THIRD_PARTY_NOTICES.txt` and the About dialog. Packaged apps also include the project license and full Electron/Chromium notices; packaging verifies their presence.
 
 This project is not affiliated with or endorsed by Prime Intellect. Prime Agent
 is a separate project and must be installed independently.
+
+## Release builds
+
+See [docs/releases.md](docs/releases.md) for architecture-specific app paths, native
+validation, checksum generation, and optional signing/notarization. Signing requires
+private credentials and has not been validated locally. Manual CI builds produce
+reviewable artifacts, not automatic public releases.

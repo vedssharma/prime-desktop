@@ -22,7 +22,7 @@ const server = createServer(socket => {
     }
   });
 });
-const executable = process.env.PRIME_DESKTOP_EXECUTABLE;
+const executable = process.env.PRIME_DESKTOP_EXECUTABLE ? path.resolve(process.env.PRIME_DESKTOP_EXECUTABLE) : undefined;
 const app = await electron.launch({ ...(executable ? { executablePath: executable, args: [`--user-data-dir=${path.join(dir, 'profile')}`] } : { args: ['.', `--user-data-dir=${path.join(dir, 'profile')}`] }), env: { ...process.env, PRIME_DESKTOP_SOCKET: socketPath, PRIME_AGENT_BIN: path.join(dir, 'missing-cli'), PRIME_DESKTOP_DEV_URL: '' } });
 let original;
 try {

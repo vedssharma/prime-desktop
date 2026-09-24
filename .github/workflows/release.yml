@@ -1,0 +1,70 @@
+name: Release artifacts
+on:
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Sign and notarize macOS (requires protected secrets)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - name: Unsigned build
+        if: ${{ !inputs.signed }}
+        run: npm run release:unsigned
+      - name: Signed and notarized build
+        if: ${{ inputs.signed }}
+        run: npm run release:signed
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - run: npm run package:check
+      - run: node scripts/test-electron.mjs
+        env:
+          PRIME_DESKTOP_EXECUTABLE: release/mac-arm64/Session Dock.app/Contents/MacOS/Session Dock
+      - name: Verify signed app
+        if: ${{ inputs.signed }}
+        run: codesign --verify --deep --strict "release/mac-arm64/Session Dock.app" && spctl --assess --type execute "release/mac-arm64/Session Dock.app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ inputs.signed && 'signed' || 'unsigned' }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/SHA256SUMS
+  linux:
+    if: ${{ !inputs.signed }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run release:unsigned
+      - run: npm run package:check
+      - run: xvfb-run -a node scripts/test-electron.mjs
+        env:
+          PRIME_DESKTOP_EXECUTABLE: release/linux-unpacked/session-dock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-unsigned
+          path: |
+            release/*.AppImage
+            release/SHA256SUMS

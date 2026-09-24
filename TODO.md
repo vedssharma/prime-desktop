@@ -7,7 +7,21 @@ notes below. No application code was changed during the original review. Destruc
 sessions; checks against the installed CLI were read-only. Review scripts and
 private screenshots are under ignored `artifacts/review/`, not intended for publication.
 
-## Validation performed
+## Implementation outcome
+
+The numbered commits address each item in order. Items **2 and 13** remain blocked
+for full functionality: Prime Agent 0.9.5 has no atomic persistent-session identity
+precondition. The desktop intentionally runs in **read-only compatibility mode**;
+all session writes/queue mutations fail before dispatch. Persisted browsing, settings,
+clipboard, connection controls, and diagnostics remain available. Do not restore
+writes with an unsafe override or another catalog preflight.
+
+Item **18** has release automation and tested unsigned builds, but actual Apple
+signing/notarization is unverified until private credentials are supplied. No public
+binary release is uploaded automatically. See `docs/daemon-safety.md` and
+`docs/releases.md` for the remaining requirements.
+
+## Original review validation
 
 - Production build and type checking: passed.
 - Existing unit/backend tests: **19/19 passed**.
@@ -312,6 +326,9 @@ robustness issues, not a demonstrated remote exploit.
 cleanly without crashing the desktop or exceeding the documented limits.
 
 ### [ ] 18. Clarify and automate release support
+
+**Implementation:** Added manual artifact workflow with supported macOS/Linux targets, package/native checks, SHA256 manifests and gated signed/notarized path that refuses missing credentials. Removed unsupported Windows target and documented architecture paths. Unsigned Apple Silicon ZIP/DMG and checksums were built and verified; explicit unsigned policy strips signing credentials. Actual signing/notarization remains UNVERIFIED pending private credentials; no public release published.
+
 
 Keep Windows marked unsupported until its daemon transport is implemented and tested.
 Document host-architecture output paths (the current macOS example is Apple Silicon).
