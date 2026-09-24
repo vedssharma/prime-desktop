@@ -24,7 +24,10 @@ export interface ConnectionStatus {
   home: string;
 }
 export interface CreateSessionInput { prompt: string; cwd: string; model?: string; }
+export interface ConnectionConfig { executable: string; socketPath: string; }
 export interface PrimeAPI {
+  getConnectionConfig(): Promise<ConnectionConfig>;
+  configureConnection(config: ConnectionConfig): Promise<void>;
   status(): Promise<ConnectionStatus>;
   connect(): Promise<ConnectionStatus>;
   listSessions(): Promise<Session[]>;

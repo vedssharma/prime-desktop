@@ -201,7 +201,7 @@ test('keyboard focus stays inside Settings, reaches inputs, and returns to its o
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
   await expect(dialog).toBeVisible();
   await expect.poll(() => dialog.evaluate(node => node.contains(document.activeElement))).toBe(true);
-  const controls = dialog.locator('button, input, select, textarea, a[href]');
+  const controls = dialog.locator('button:visible, input:visible, select:visible, textarea:visible, a[href]:visible, summary:visible');
   const seen = new Set<string>();
   // Two complete cycles cover native radio-group tab behavior and both boundaries.
   for (let i = 0; i < (await controls.count()) * 2; i++) {

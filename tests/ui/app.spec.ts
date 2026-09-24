@@ -170,3 +170,14 @@ test('About exposes bundled third-party acknowledgements', async ({ page }) => {
   await expect(page.locator('.third-party-notices pre')).toContainText('MIT');
   await expect(page.locator('.third-party-notices pre')).toContainText('react');
 });
+
+
+test('model search and setup guidance are available', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('textbox', { name: 'Search models' }).fill('nonexistent');
+  await expect(page.getByRole('combobox', { name: 'Model', exact: true }).locator('option')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByText('Connection & setup', { exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'CLI executable' })).toBeVisible();
+  await expect(page.getByRole('dialog')).toContainText('/login');
+});

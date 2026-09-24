@@ -240,7 +240,10 @@ Use only disposable fake sessions for mutations. Make release jobs depend on pas
 
 ## P3 — usability and maintenance improvements
 
-### [ ] 12. Improve first-run connection and model discovery
+### [x] 12. Improve first-run connection and model discovery
+
+**Implementation:** Added explicit service-start/reconnect action, setup guidance and editable validated executable/socket paths (stored main-side, no keys), plus model search. Errors already surfaced by item9. Connection edits replace only the client connection, not workers.
+
 
 Explain CLI installation/login requirements in-app, offer a distinct **Start agent
 service** action instead of only Reconnect, expose diagnostics and executable/socket

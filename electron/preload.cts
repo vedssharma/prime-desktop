@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 const invoke = (method: string, ...args: unknown[]) => ipcRenderer.invoke(`prime:${method}`, ...args);
 contextBridge.exposeInMainWorld('prime', Object.freeze({
+  getConnectionConfig: () => invoke('getConnectionConfig'),
+  configureConnection: (config: { executable: string; socketPath: string }) => invoke('configureConnection', config),
   copyText: (text: string) => invoke('copyText', text),
   status: () => invoke('status'),
   connect: () => invoke('connect'),

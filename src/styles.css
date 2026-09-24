@@ -496,3 +496,5 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 @media(max-width:900px){.sidebar:not(.is-open){visibility:hidden}.brand{min-width:0}.brand .brand-name{font-size:20px}.sidebar .mobile-close{flex-shrink:0}}
 
 .third-party-notices{margin:16px 0}.third-party-notices summary{cursor:pointer;color:var(--accent-text)}.third-party-notices pre{max-height:230px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--surface-subtle);font-size:12px;color:var(--text)}
+
+.connection-settings{margin-top:20px;border-top:1px solid var(--border);padding-top:16px}.connection-settings summary{cursor:pointer;color:var(--accent-text)}.connection-settings label{display:block;margin:12px 0}.connection-settings input{display:block;width:100%;padding:8px;color:var(--text);background:var(--surface);border:1px solid var(--border-strong);border-radius:5px}.model-search{width:95px;min-width:45px;border:1px solid var(--border);border-radius:4px;padding:4px;background:var(--surface);color:var(--text);font-size:11px}@media(max-width:1000px){.model-search{width:65px}}

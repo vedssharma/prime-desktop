@@ -1,13 +1,29 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, clipboard } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { stat } from 'node:fs/promises';
+import { stat, readFile, writeFile, rename, mkdir, access } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { PrimeService } from './prime.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const devURL = !app.isPackaged ? process.env.PRIME_DESKTOP_DEV_URL : undefined;
 if (devURL && devURL !== 'http://127.0.0.1:5173') throw new Error('Unexpected development URL');
 let service: PrimeService;
+let connectionConfig = { executable: '', socketPath: '' };
+function createService() { return new PrimeService({ executable: connectionConfig.executable || undefined, socketPath: connectionConfig.socketPath || undefined }); }
+async function validateConfig(value: unknown) {
+  if (!value || typeof value !== 'object') throw new Error('Invalid connection settings');
+  const record = value as Record<string, unknown>;
+  const result = { executable: '', socketPath: '' };
+  for (const key of ['executable', 'socketPath'] as const) {
+    if (typeof record[key] !== 'string' || record[key].length > 4096 || record[key].includes('\0')) throw new Error(`Invalid ${key}`);
+    result[key] = record[key].trim();
+    if (result[key] && !path.isAbsolute(result[key])) throw new Error(`${key} must be an absolute path`);
+  }
+  if (result.executable) { if (!(await stat(result.executable)).isFile()) throw new Error('CLI must be a file'); await access(result.executable, constants.X_OK); }
+  return result;
+}
+
 let window: BrowserWindow | null = null;
 
 function text(value: unknown, field: string, max = 100_000): string {
@@ -30,6 +46,14 @@ function registerIPC() {
       return fn(...args);
     });
   };
+  handle('getConnectionConfig', () => connectionConfig);
+  handle('configureConnection', async (value) => {
+    const next = await validateConfig(value);
+    const dir = app.getPath('userData'); await mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'connection.json');
+    await writeFile(file + '.tmp', JSON.stringify(next), { mode: 0o600 }); await rename(file + '.tmp', file);
+    connectionConfig = next; service.close(); service = createService();
+  });
   handle('copyText', async (value) => { await clipboard.writeText(text(value, 'clipboard text', 4 * 1024 * 1024)); });
   handle('status', () => service.status());
   handle('connect', () => service.connect());
@@ -76,8 +100,9 @@ function createWindow() {
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { if (window?.isMinimized()) window.restore(); window?.show(); window?.focus(); });
-  app.whenReady().then(() => {
-    service = new PrimeService();
+  app.whenReady().then(async () => {
+    try { connectionConfig = await validateConfig(JSON.parse(await readFile(path.join(app.getPath('userData'), 'connection.json'), 'utf8'))); } catch { /* Defaults recover from stale/invalid paths. */ }
+    service = createService();
     registerIPC();
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
