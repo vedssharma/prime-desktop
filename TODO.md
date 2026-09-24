@@ -126,7 +126,10 @@ an actionable failure state instead of swallowing it.
 **Acceptance:** A real Electron click copies the exact displayed response and shows
 confirmation; other permissions stay denied. Restore the previous clipboard after tests.
 
-### [ ] 6. Reduce transcript rendering and polling costs — measured
+### [x] 6. Reduce transcript rendering and polling costs — measured
+
+**Implementation:** Memoized message rendering by value, limited initial DOM to100 messages with load-earlier, slowed idle polling to10s, and cached unchanged saved files by identity/inode/timestamps/size. Added long-transcript DOM regression.
+
 
 **Where:** `src/App.tsx:21–26,129–143,230`; `electron/prime.ts:145–157`.
 

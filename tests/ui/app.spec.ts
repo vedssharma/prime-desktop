@@ -134,3 +134,16 @@ test('copy uses native bridge and displays failures', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Response copied', exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as any).__copied)).toContain('Project overview');
 });
+
+
+test('long transcripts are windowed and draft edits preserve message DOM', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).prime.getMessages = async () => Array.from({ length: 250 }, (_, i) => ({ id: `m${i}`, role: 'assistant', content: `## Message ${i}\nA small **Markdown** response.` })); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Explore the workspace/ }).click();
+  await expect(page.locator('.message')).toHaveCount(100);
+  await page.evaluate(() => { const node = document.querySelector('.message'); (window as any).__messageNode = node; (window as any).__mutations = 0; new MutationObserver(records => { (window as any).__mutations += records.length; }).observe(node!, { subtree: true, childList: true, attributes: true }); });
+  await page.getByRole('textbox', { name: 'Message Prime' }).fill('Typing should not reparse Markdown');
+  expect(await page.evaluate(() => (window as any).__mutations)).toBe(0);
+  await page.getByRole('button', { name: /Load earlier messages/ }).click();
+  await expect(page.locator('.message')).toHaveCount(200);
+});

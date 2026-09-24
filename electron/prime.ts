@@ -79,6 +79,7 @@ export class PrimeService {
   private options: PrimeOptions;
   private home: string;
   private executable?: string;
+  private transcriptCache?: { key: string; messages: Message[] };
   private models?: { id: string; name: string }[];
   private modelsLoading?: Promise<{ id: string; name: string }[]>;
   constructor(options: PrimeOptions = {}) {
@@ -148,14 +149,19 @@ export class PrimeService {
     // Runtime IDs are reusable, so use the catalog's persisted file and verify its header.
     const raw = await this.lookup(id, true);
     if (!raw.sessionFile) throw new Error('This session has no saved transcript. Open it in the CLI.');
-    if ((await stat(raw.sessionFile)).size > 64 * 1024 * 1024) throw new Error('This saved transcript exceeds the 64 MiB desktop limit. Open it in the CLI.');
+    const metadata = await stat(raw.sessionFile);
+    const cacheKey = JSON.stringify([id, raw.sessionFile, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs]);
+    if (this.transcriptCache?.key === cacheKey) return this.transcriptCache.messages;
+    if (metadata.size > 64 * 1024 * 1024) throw new Error('This saved transcript exceeds the 64 MiB desktop limit. Open it in the CLI.');
     const contents = await readFile(raw.sessionFile, 'utf8');
     let header: WireRecord;
     try { header = JSON.parse(contents.split('\n', 1)[0]); }
     catch { throw new Error('Invalid saved session header.'); }
     if (header?.type !== 'session' || header.id !== id) throw new Error('Session identity mismatch. Refusing to display another conversation.');
     if (contents.split('\n').slice(1).some(line => { try { return JSON.parse(line)?.type === 'session'; } catch { return false; } })) throw new Error('Multiple session headers. Refusing an ambiguous transcript.');
-    return normalizeMessages(parseSavedTranscript(contents));
+    const messages = normalizeMessages(parseSavedTranscript(contents));
+    this.transcriptCache = { key: cacheKey, messages };
+    return messages;
   }
   async listModels(): Promise<{ id: string; name: string }[]> {
     if (this.models) return this.models;

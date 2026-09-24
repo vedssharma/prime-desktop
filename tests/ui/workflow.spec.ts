@@ -301,6 +301,7 @@ test('pending delete cannot be dismissed by Escape or background navigation', as
 
 
 test('old polling reply cannot overwrite a newer post-send transcript', async ({ page }) => {
+  await page.clock.install();
   await openApp(page);
   await selectSession(page, 'Alpha');
   await expect(page.getByRole('heading', { name: 'The next step is yours.' })).toBeVisible();
@@ -308,6 +309,7 @@ test('old polling reply cannot overwrite a newer post-send transcript', async ({
     const api = (window as any).prime; const original = api.getMessages; let first = true;
     api.getMessages = (id: string) => { if (first) { first = false; return new Promise(resolve => { (window as any).__oldRead = () => resolve([]); }); } return original(id); };
   });
+  await page.clock.runFor(10001);
   await expect.poll(() => page.evaluate(() => typeof (window as any).__oldRead)).toBe('function');
   await composer(page).fill('Newest message');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
