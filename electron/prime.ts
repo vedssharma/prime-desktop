@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import { DaemonTransport, type WireRecord } from './transport.js';
+import { readBoundedFile, isRecord } from './bounded-io.js';
 
 const exec = promisify(execFile);
 interface Session { id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; }
@@ -56,8 +57,10 @@ export function parseSavedTranscript(contents: string): WireRecord[] {
   const lines = contents.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
-    try { entries.push(JSON.parse(lines[i])); }
-    catch { if (i !== lines.length - 1) throw new Error('Saved transcript contains invalid JSON.'); }
+    let entry: unknown;
+    try { entry = JSON.parse(lines[i]); } catch { if (i !== lines.length - 1) throw new Error('Saved transcript contains invalid JSON.'); else continue; }
+    if (!isRecord(entry) || typeof entry.type !== 'string') throw new Error('Saved transcript contains an invalid record.');
+    entries.push(entry);
   }
   const nodes = entries.filter(entry => typeof entry.id === 'string' && entry.type !== 'session');
   const byId = new Map(nodes.map(entry => [entry.id, entry]));
@@ -132,7 +135,7 @@ export class PrimeService {
   }
   async listSessions(): Promise<Session[]> {
     const data = await this.transport.request({ type: 'list', all: true });
-    if (!Array.isArray(data.sessions)) throw new Error('Invalid daemon session list.');
+    if (!Array.isArray(data.sessions) || !data.sessions.every(isRecord)) throw new Error('Invalid daemon session list.');
     const next = new Map<string, WireRecord>();
     for (const raw of data.sessions) {
       if (raw.runtimeKind === 'subagent' || raw.rlmDepth > 0 || raw.parentSessionId) continue;
@@ -159,7 +162,7 @@ export class PrimeService {
     const cacheKey = JSON.stringify([id, raw.sessionFile, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs]);
     if (this.transcriptCache?.key === cacheKey) return this.transcriptCache.messages;
     if (metadata.size > 64 * 1024 * 1024) throw new Error('This saved transcript exceeds the 64 MiB desktop limit. Open it in the CLI.');
-    const contents = await readFile(raw.sessionFile, 'utf8');
+    const contents = await readBoundedFile(raw.sessionFile);
     let header: WireRecord;
     try { header = JSON.parse(contents.split('\n', 1)[0]); }
     catch { throw new Error('Invalid saved session header.'); }

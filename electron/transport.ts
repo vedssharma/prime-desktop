@@ -1,5 +1,6 @@
 import { createConnection, type Socket } from 'node:net';
 import { randomUUID } from 'node:crypto';
+import { isRecord, JsonlDecoder } from './bounded-io.js';
 
 export type WireRecord = Record<string, any>;
 export interface DaemonHello extends WireRecord {
@@ -37,8 +38,7 @@ export class DaemonTransport {
       const socket = createConnection(this.socketPath);
       this.socket = socket;
       this.hello = undefined;
-      socket.setEncoding('utf8');
-      let buffer = '';
+      const decoder = new JsonlDecoder();
       const timer = setTimeout(() => fail(new Error('Timed out waiting for the Prime Agent daemon handshake.')), Math.min(this.timeoutMs, 5000));
       let failed = false;
       const fail = (error: Error) => {
@@ -59,36 +59,31 @@ export class DaemonTransport {
       };
       socket.on('error', fail);
       socket.on('close', () => fail(new Error('Prime Agent daemon disconnected.')));
-      socket.on('data', (chunk: string) => {
-        buffer += chunk;
-        // No readline: U+2028 and U+2029 inside strings are valid JSONL content.
-        let newline: number;
-        while ((newline = buffer.indexOf('\n')) >= 0) {
-          if (newline > 64 * 1024 * 1024) { fail(new Error('Prime Agent response exceeds the 64 MiB desktop limit.')); return; }
-          const line = buffer.slice(0, newline).replace(/\r$/, '');
-          buffer = buffer.slice(newline + 1);
-          if (!line) continue;
-          let record: WireRecord;
-          try { record = JSON.parse(line); } catch { fail(new Error('Invalid JSON from Prime Agent daemon.')); return; }
-          if (record.type === 'daemon_hello') {
-            if (record.protocol?.name !== 'prime-agent.daemon' || record.protocol.version !== 7 || (record.schemaRevision ?? 0) < 28) {
-              fail(new Error(`Unsupported Prime Agent daemon protocol ${record.protocol?.version ?? '?'} / schema ${record.schemaRevision ?? '?'}. This desktop supports protocol 7, schema 28 or newer. Update the desktop or CLI.`));
-              return;
+      socket.on('data', (chunk: Buffer) => {
+        try {
+          decoder.feed(chunk, line => {
+            if (failed || this.socket !== socket) return;
+            let record: unknown;
+            try { record = JSON.parse(line); } catch { throw new Error('Invalid JSON from Prime Agent daemon.'); }
+            if (!isRecord(record) || typeof record.type !== 'string') throw new Error('Invalid daemon record.');
+            if (record.type === 'daemon_hello') {
+              if (this.hello) throw new Error('Duplicate daemon handshake.');
+              if (!isRecord(record.protocol) || record.protocol.name !== 'prime-agent.daemon' || record.protocol.version !== 7 || !Number.isInteger(record.schemaRevision) || record.schemaRevision < 28) {
+                throw new Error(`Unsupported Prime Agent daemon protocol ${record.protocol?.version ?? '?'} / schema ${record.schemaRevision ?? '?'}.`);
+              }
+              if (record.serverCapabilities !== undefined && (!Array.isArray(record.serverCapabilities) || !record.serverCapabilities.every((item: unknown) => typeof item === 'string'))) throw new Error('Invalid daemon capabilities.');
+              this.hello = record as DaemonHello; clearTimeout(timer); resolve(this.hello);
+            } else if (record.type === 'response') {
+              if (!this.hello || typeof record.id !== 'string' || typeof record.success !== 'boolean' || (record.error !== undefined && typeof record.error !== 'string') || (record.data !== undefined && !isRecord(record.data))) throw new Error('Invalid daemon response.');
+              const request = this.pending.get(record.id);
+              if (!request) return;
+              this.pending.delete(record.id); clearTimeout(request.timer);
+              if (request.mutation) this.write({ type: 'ack_result', commandId: record.id });
+              if (record.success) request.resolve(record.data ?? {});
+              else request.reject(new Error(record.error ?? 'Prime Agent rejected the request.'));
             }
-            this.hello = record as DaemonHello;
-            clearTimeout(timer);
-            resolve(this.hello);
-          } else if (record.type === 'response' && typeof record.id === 'string') {
-            const request = this.pending.get(record.id);
-            if (!request) continue;
-            this.pending.delete(record.id);
-            clearTimeout(request.timer);
-            if (request.mutation) this.write({ type: 'ack_result', commandId: record.id });
-            if (record.success === true) request.resolve(record.data ?? {});
-            else request.reject(new Error(record.error ?? 'Prime Agent rejected the request.'));
-          }
-        }
-        if (buffer.length > 64 * 1024 * 1024) fail(new Error('Prime Agent response exceeds the 64 MiB desktop limit.'));
+          });
+        } catch (error) { fail(error instanceof Error ? error : new Error('Invalid daemon data.')); }
       });
     });
   }

@@ -294,7 +294,10 @@ use an explicit callback and add a test tsconfig. Declare Node engines and the t
 package-manager version. Document Electron restart requirements or add main/preload
 watch-and-restart support (`scripts/dev.mjs:3–4`).
 
-### [ ] 17. Validate daemon records and enforce byte-based resource limits — source-verified
+### [x] 17. Validate daemon records and enforce byte-based resource limits — source-verified
+
+**Implementation:** Added bounded UTF-8 byte framing before decode/parse, validated hello/response structures, rejected scalar saved records, and used a capped open-file read that detects growth beyond limit. Tests cover malformed/null/scalar frames, multibyte boundaries and oversized files.
+
 
 **Where:** `electron/transport.ts:62–91`; `electron/prime.ts:155–157`.
 
