@@ -87,7 +87,6 @@ export class PrimeService {
   private home: string;
   private executable?: string;
   private transcriptCache?: { key: string; messages: Message[] };
-  private models?: { id: string; name: string }[];
   private modelsLoading?: Promise<{ id: string; name: string }[]>;
   constructor(options: PrimeOptions = {}) {
     this.options = options;
@@ -171,7 +170,6 @@ export class PrimeService {
     return messages;
   }
   async listModels(): Promise<{ id: string; name: string }[]> {
-    if (this.models) return this.models;
     if (!this.modelsLoading) this.modelsLoading = this.loadModels().finally(() => { this.modelsLoading = undefined; });
     return this.modelsLoading;
   }
@@ -184,7 +182,7 @@ export class PrimeService {
       const match = line.trim().match(/^(\S+)\s+(\S+)\s+[\d.]+[KMB]?\s+/);
       if (match) models.push({ id: `${match[1]}/${match[2]}`, name: `${match[2]} · ${match[1]}` });
     }
-    this.models = models;
+    if (!models.length && stdout.trim() && !/no (?:available |configured )?models|provider\s+model/i.test(stdout)) throw new Error('Unrecognized CLI model catalog. Update the CLI or check model configuration.');
     return models;
   }
   // Fail closed before any create/resume/prompt/kill or saved-file mutation.

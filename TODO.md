@@ -183,7 +183,10 @@ becomes available rather than duplicating format assumptions.
 **Acceptance:** Active/saved fixture pairs preserve user-visible notices, branches and
 summaries consistently; hidden entries remain hidden.
 
-### [ ] 9. Refresh model discovery instead of caching it forever — source-verified
+### [x] 9. Refresh model discovery instead of caching it forever — source-verified
+
+**Implementation:** Removed service-lifetime model caching (concurrent reads still coalesce). Reconnect always reloads, automatic connected transitions fetch models, and discovery errors are visible. CLI-shim test verifies empty→populated catalog and invalid-output handling.
+
 
 **Where:** `electron/prime.ts:108–123,159–174`; `src/App.tsx:102,162–164`.
 

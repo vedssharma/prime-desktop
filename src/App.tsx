@@ -131,7 +131,7 @@ export default function App() {
         setConnection(status); setCwd(previous => previous || status.home);
         if (status.connected) {
           // Model discovery can be slow. Do not block the session list on it.
-          void window.prime.listModels().then(choices => { if (!cancelled) setModels(choices); }).catch(() => {});
+          // Model discovery is handled independently on each connection transition.
           const list = await window.prime.listSessions();
           if (!cancelled) setSessions(list);
         }
@@ -141,6 +141,13 @@ export default function App() {
     void initialize();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!connection?.connected) return;
+    let cancelled = false;
+    void window.prime.listModels().then(choices => { if (!cancelled) setModels(choices); }).catch(error => { if (!cancelled) setError(`Model discovery: ${errorText(error)}`); });
+    return () => { cancelled = true; };
+  }, [connection?.connected]);
 
   useEffect(() => {
     let stopped = false;
@@ -197,6 +204,7 @@ export default function App() {
         if (list.status === 'fulfilled') setSessions(list.value);
         else setError(errorText(list.reason));
         if (choices.status === 'fulfilled') setModels(choices.value);
+        else setError(`Model discovery: ${errorText(choices.reason)}`);
       } else setError(status.error || 'Could not connect to Prime Agent. Check that the CLI is installed and authenticated.'); }
     catch (err) { setError(errorText(err)); } finally { setConnecting(false); }
   }
