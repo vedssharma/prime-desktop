@@ -1,0 +1,81 @@
+{
+  "name": "prime-desktop",
+  "version": "0.1.0",
+  "description": "A desktop companion for the Prime Agent CLI",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && tsc -p tsconfig.electron.json",
+    "start": "electron .",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "package": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "test:ui": "playwright test"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.4.4",
+    "electron-builder": "^26.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "vite": "^8.3.0"
+  },
+  "build": {
+    "appId": "ai.primeintellect.desktop",
+    "productName": "Prime Desktop",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "icon": "build/icon.png",
+    "npmRebuild": false
+  },
+  "license": "MIT",
+  "author": "Ved Sharma",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vedssharma/prime-desktop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vedssharma/prime-desktop/issues"
+  },
+  "homepage": "https://github.com/vedssharma/prime-desktop#readme"
+}
