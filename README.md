@@ -53,9 +53,22 @@ Closing the window does not stop agent work. Use Stop in a session to interrupt 
 - Rename and delete sessions with confirmation.
 - Keep resident sessions running when the app closes, so you can return from the desktop or CLI.
 
+## Appearance
+
+Open **Settings** (the gear in the sidebar) to customize the app:
+
+- **Theme:** Light, Dark, or System. System follows your OS appearance and updates when it changes.
+- **Palette:** Stone, Slate, or Sand for neutral surfaces and backgrounds.
+- **Accent:** Choose a preset or use a custom color picker / six-digit hex value.
+
+Changes apply immediately and persist locally across launches. Accent text and
+button labels adjust for contrast. **Reset appearance** restores System, Stone,
+and the default lime accent without touching workspace/model choices or drafts.
+These are desktop-only settings and do not change the CLI's theme.
+
 ## Drafts and follow-ups
 
-Drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. Only the new-session workspace path and model choice are stored locally.
+Drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. Only the new-session workspace path, model choice, and appearance settings are stored locally.
 
 During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
 
