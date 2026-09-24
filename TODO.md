@@ -272,7 +272,10 @@ and draft/send guidance. Add density/font-size settings, raise useful text minim
 and test keyboard use and layout at 125–200% zoom. Keep decorative text separate from
 critical guidance.
 
-### [ ] 15. Polish custom-color validation and preferences feedback
+### [x] 15. Polish custom-color validation and preferences feedback
+
+**Implementation:** Reserved stable hex-validation space; Done explicitly validates and stays open on invalid text. Workspace/model persistence now reports storage failure without blocking use. Added Done position/validation and blocked-storage UI tests.
+
 
 Typing an invalid hex color and clicking Done can insert an error on blur, moving
 the button before its click lands; the first click leaves Settings open. Keep error

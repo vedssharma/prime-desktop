@@ -11,7 +11,7 @@ export function loadPreferences(): Preferences {
     };
   } catch { return { cwd: '', model: '' }; }
 }
-export function savePreferences(preferences: Preferences): void {
+export function savePreferences(preferences: Preferences): boolean {
   // Never persist prompts, transcripts, or credentials in renderer storage.
-  try { localStorage.setItem(KEY, JSON.stringify(preferences)); } catch { /* Storage may be unavailable. */ }
+  try { localStorage.setItem(KEY, JSON.stringify(preferences)); return true; } catch { return false; }
 }

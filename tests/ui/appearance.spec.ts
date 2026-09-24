@@ -283,3 +283,19 @@ test('readability settings persist and compact zoom-equivalent layout stays usab
   const bounds = await page.getByRole('dialog').boundingBox(); expect(bounds!.height).toBeLessThanOrEqual(450);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+
+test('invalid hex keeps Done in place and blocks closing with a clear error', async ({ page }) => {
+  await page.goto('/'); const dialog = await openSettings(page);
+  const input = dialog.getByLabel('Accent hex value', { exact: true }); const done = dialog.getByRole('button', { name: 'Done', exact: true });
+  await input.fill('#zzzzzz'); const before = await done.boundingBox();
+  await done.click(); await expect(dialog.getByRole('alert')).toContainText('six-digit');
+  const after = await done.boundingBox(); expect(after!.y).toBe(before!.y);
+  await input.fill('#123456'); await done.click(); await expect(dialog).toHaveCount(0);
+});
+
+test('workspace storage failure is visible without blocking the app', async ({ page }) => {
+  await page.addInitScript(() => { const original = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if (key === 'prime-desktop.preferences.v1') throw Error('blocked'); return original.call(this, key, value); }; });
+  await page.goto('/'); await expect(page.getByRole('alert')).toContainText('Workspace and model preferences could not be saved');
+  await page.getByRole('textbox', { name: 'Message Prime' }).fill('Draft still works');
+});

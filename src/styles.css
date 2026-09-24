@@ -516,3 +516,5 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 @media(max-width:600px){.topbar{padding-inline:12px}.starter-grid{grid-template-columns:1fr}.composer-area{padding-inline:12px}.content-scroll{min-width:0}.welcome{padding-inline:16px}.model-search{display:none}.session-context{padding-inline:12px}.topbar-actions .local-badge{display:none}.breadcrumb{min-width:0}.main-footer{display:none}}
 
 @media(max-height:600px){.sidebar{overflow-y:auto}.sidebar>*{flex-shrink:0}.sidebar .session-list{min-height:70px;flex-shrink:1}.sidebar .local-note{padding:7px;margin-bottom:6px}.sidebar .sidebar-search{margin-bottom:10px}.sidebar .sidebar-bottom{padding-top:6px}.sidebar .window-drag{min-height:30px;height:30px}.sidebar .brand{height:40px;margin-bottom:8px}}
+
+.accent-error-space{height:76px;overflow:auto;display:flow-root}.accent-error-space .settings-error{margin:6px 0}.settings-modal{scrollbar-gutter:stable}
