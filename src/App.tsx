@@ -94,6 +94,16 @@ export default function App() {
   const readOnly = connection?.readOnly === true;
   const currentCwd = active?.cwd || cwd;
   const refresh = useCallback(async () => { const list = await window.prime.listSessions(); setSessions(list); }, []);
+  const messageRead = useRef(0);
+  const readMessages = useCallback(async (id: string) => {
+    const request = ++messageRead.current;
+    try {
+      const next = await window.prime.getMessages(id);
+      if (request === messageRead.current && activeIdRef.current === id) setMessages(next);
+    } catch (error) {
+      if (request === messageRead.current && activeIdRef.current === id) throw error;
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,13 +150,13 @@ export default function App() {
     let timer: ReturnType<typeof setTimeout>;
     setLoadingMessages(true);
     async function poll() {
-      try { const next = await window.prime.getMessages(activeId!); if (!cancelled) setMessages(next); }
+      try { await readMessages(activeId!); }
       catch (err) { if (!cancelled) setError(errorText(err)); }
       finally { if (!cancelled) { setLoadingMessages(false); timer = setTimeout(poll, 2000); } }
     }
     void poll();
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [activeId]);
+    return () => { cancelled = true; ++messageRead.current; clearTimeout(timer); };
+  }, [activeId, readMessages]);
 
   useEffect(() => { if (followBottom.current && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }, [messages, running]);
   useEffect(() => { if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 190)}px`; } }, [draft]);
@@ -193,8 +203,7 @@ export default function App() {
         setNotices(previous => ({ ...previous, [submittedKey]: queued ? 'Follow-up queued. Prime will pick it up after the current work finishes.' : 'Message accepted.' }));
         if (activeIdRef.current === target) {
           followBottom.current = true;
-          const next = await window.prime.getMessages(target);
-          if (activeIdRef.current === target) setMessages(next);
+          await readMessages(target);
         }
       } else {
         const created = await window.prime.createSession({ prompt: text, cwd, ...(model ? { model } : {}) });

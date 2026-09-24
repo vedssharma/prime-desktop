@@ -91,7 +91,10 @@ a newer modal. Errors remain associated with the operation that caused them.
 
 ## P2 — correctness, responsiveness, and release readiness
 
-### [ ] 4. Stop older transcript reads from overwriting newer state — confirmed
+### [x] 4. Stop older transcript reads from overwriting newer state — confirmed
+
+**Implementation:** Polling and post-send reads share a monotonic request sequence. Session switches invalidate prior reads and errors. Added controlled out-of-order transcript regression.
+
 
 **Where:** `src/App.tsx:129–141,186–189`.
 

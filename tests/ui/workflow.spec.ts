@@ -298,3 +298,21 @@ test('pending delete cannot be dismissed by Escape or background navigation', as
   await page.evaluate(() => (window as any).__resolveDelete());
   await expect(dialog).toHaveCount(0);
 });
+
+
+test('old polling reply cannot overwrite a newer post-send transcript', async ({ page }) => {
+  await openApp(page);
+  await selectSession(page, 'Alpha');
+  await expect(page.getByRole('heading', { name: 'The next step is yours.' })).toBeVisible();
+  await page.evaluate(() => {
+    const api = (window as any).prime; const original = api.getMessages; let first = true;
+    api.getMessages = (id: string) => { if (first) { first = false; return new Promise(resolve => { (window as any).__oldRead = () => resolve([]); }); } return original(id); };
+  });
+  await expect.poll(() => page.evaluate(() => typeof (window as any).__oldRead)).toBe('function');
+  await composer(page).fill('Newest message');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await settleSend(page);
+  await expect(page.getByText('Newest message', { exact: true })).toBeVisible();
+  await page.evaluate(() => (window as any).__oldRead());
+  await expect(page.getByText('Newest message', { exact: true })).toBeVisible();
+});
