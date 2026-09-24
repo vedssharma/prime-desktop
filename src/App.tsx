@@ -52,7 +52,13 @@ export default function App() {
   const [notices, setNotices] = useState<Record<string, string>>({});
   const notice = notices[draftKey];
   useEffect(() => { savePreferences({ cwd, model }); }, [cwd, model]);
-  const [pending, setPending] = useState(false);
+  const [pendingBySession, setPendingBySession] = useState<Record<string, boolean>>({});
+  const pendingKeys = useRef(new Set<string>());
+  const pending = !!pendingBySession[draftKey];
+  const setPendingFor = (key: string, value: boolean) => {
+    if (value) pendingKeys.current.add(key); else pendingKeys.current.delete(key);
+    setPendingBySession(previous => ({ ...previous, [key]: value }));
+  };
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -215,12 +221,12 @@ export default function App() {
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     const text = draft.trim();
-    if (readOnly || dialogRef.current || !text || pending || !connection?.connected || (!activeId && !cwd)) return;
+    if (readOnly || dialogRef.current || !text || pendingKeys.current.has(draftKey) || !connection?.connected || (!activeId && !cwd)) return;
     const target = activeId;
     const submittedKey = draftKey;
     const submittedRevision = draftEntry?.revision;
     const queued = !!target && running;
-    setPending(true); setError('');
+    setPendingFor(submittedKey, true); setError('');
     setNotices(previous => ({ ...previous, [submittedKey]: '' }));
     let accepted = false;
     try {
@@ -243,9 +249,14 @@ export default function App() {
       await refresh();
     } catch (err) {
       setError(accepted ? `Message accepted, but the view could not refresh: ${errorText(err)}. Do not resend it.` : errorText(err));
-    } finally { setPending(false); } // Never move focus after an asynchronous operation.
+    } finally { setPendingFor(submittedKey, false); } // Never move focus after an asynchronous operation.
   }
-  async function stop() { if (!activeId) return; setPending(true); try { await window.prime.interruptSession(activeId); await refresh(); } catch (err) { setError(errorText(err)); } finally { setPending(false); } }
+  async function stop() {
+    if (!activeId || readOnly || pendingKeys.current.has(activeId)) return;
+    const target = activeId; setPendingFor(target, true);
+    try { await window.prime.interruptSession(target); await refresh(); }
+    catch (err) { setError(errorText(err)); } finally { setPendingFor(target, false); }
+  }
   async function confirmDialog(event: FormEvent) {
     event.preventDefault();
     if (!activeId || dialogPendingRef.current || readOnly) return;
@@ -282,6 +293,7 @@ export default function App() {
     <main inert={!!dialog || drawerOpen} className="main-panel">
       <header className="topbar"><div className="breadcrumb"><button ref={sidebarToggle} className="icon-button sidebar-toggle" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={18} /></button><span className="breadcrumb-root">Workspace</span><span className="breadcrumb-slash">/</span><strong>{active?.title || 'New session'}</strong>{running && <span className="header-running"><span className="running-dot" />Working</span>}</div><div className="topbar-actions">{!isElectron && <span className="preview-badge">READ-ONLY PREVIEW</span>}<span className="local-badge"><span /> LOCAL</span>{active && <div className="session-menu"><button className="icon-button" aria-label="Session actions" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={20} /></button>{menuOpen && <><button className="menu-dismiss" aria-label="Close session actions" onClick={() => setMenuOpen(false)} /><div className="dropdown"><button disabled={readOnly} onClick={() => { setRenameTitle(active.title); setDialog('rename'); setMenuOpen(false); }}><Pencil size={14} />Rename session</button><button onClick={() => { setMenuOpen(false); void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))); }}><FolderOpen size={14} />Reveal folder</button><button className="danger-text" disabled={readOnly} onClick={() => { setDialog('delete'); setMenuOpen(false); }}><Trash2 size={14} />Delete session</button></div></>}</div>}<button className="icon-button help-button" aria-label="About this app" onClick={() => setDialog('about')}><CircleHelp size={18} /></button></div></header>
       {active && <div className="session-context"><button onClick={() => void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err)))} title={active.cwd}><Folder size={13} /><span>{active.cwd}</span></button><span className="context-separator" /><span><Zap size={12} />{active.model || 'CLI default'}</span></div>}
+      {active && <details className="queue-status"><summary>Work &amp; queue status</summary><p>{running ? 'Agent reports active work.' : 'Agent reports no active work.'} {pending ? 'A desktop request is awaiting confirmation.' : 'No desktop request is pending for this session.'}</p><p>Authoritative queue details are unavailable with this daemon protocol. This is not an empty-queue report. View, edit, or cancel queued work in the CLI.</p></details>}
       {readOnly && <div className="offline-banner" role="status">{connection?.safetyReason}</div>}
       {error && <div className="error-banner" role="alert"><CircleHelp size={16} /><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
       {connection && !connection.connected && <div className="offline-banner"><span>{connection.error || 'Connect to Prime Agent to start working.'}</span><button onClick={reconnect} disabled={connecting}>{connecting ? 'Connecting...' : 'Start agent service / reconnect'}<RefreshCw size={12} className={connecting ? 'spin' : ''} /></button></div>}

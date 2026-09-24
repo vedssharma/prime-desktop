@@ -253,6 +253,9 @@ when credentials/provider configuration changes (`electron/prime.ts:159–174`).
 
 ### [ ] 13. Expose queue state and per-session pending operations
 
+**Implementation:** Per-session pending operations implemented with duplicate-request guards; unrelated sessions remain usable. Queue status explicitly distinguishes unavailable authority from an empty queue. Queue viewing/edit/cancel remains BLOCKED by the same upstream identity race as item2; no unsafe get_queue/mutate_queued_message calls added.
+
+
 The UI acknowledges admission but does not show the authoritative queued prompts,
 allow cancellation/editing, or distinguish queued/running/completed work clearly.
 A single global `pending` flag can disable Stop in another session while an operation

@@ -318,3 +318,18 @@ test('old polling reply cannot overwrite a newer post-send transcript', async ({
   await page.evaluate(() => (window as any).__oldRead());
   await expect(page.getByText('Newest message', { exact: true })).toBeVisible();
 });
+
+
+test('a pending request in one session does not block another session', async ({ page }) => {
+  await openApp(page);
+  await selectSession(page, 'Alpha');
+  await composer(page).fill('Pending Alpha');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await selectSession(page, 'Beta'); await composer(page).fill('Independent Beta');
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+  await selectSession(page, 'Alpha');
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeDisabled();
+  await settleSend(page);
+  await page.getByText('Work & queue status', { exact: true }).click();
+  await expect(page.getByText(/This is not an empty-queue report/)).toBeVisible();
+});
