@@ -121,3 +121,16 @@ test('uses independent branding and clearly disclaims upstream affiliation', asy
   await expect(about).toContainText('not affiliated with or endorsed by Prime Intellect');
   await expect(about).toContainText('Prime Agent is a separate project');
 });
+
+
+test('copy uses native bridge and displays failures', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).prime.copyText = async () => { throw Error('Clipboard unavailable'); }; });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Explore the workspace/ }).click();
+  await page.getByRole('button', { name: 'Copy response', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Copy failed: Clipboard unavailable');
+  await page.evaluate(() => { (window as any).prime.copyText = async (text: string) => { (window as any).__copied = text; }; });
+  await page.getByRole('button', { name: 'Copy response', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Response copied', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__copied)).toContain('Project overview');
+});

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, clipboard } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
@@ -30,6 +30,7 @@ function registerIPC() {
       return fn(...args);
     });
   };
+  handle('copyText', async (value) => { await clipboard.writeText(text(value, 'clipboard text', 4 * 1024 * 1024)); });
   handle('status', () => service.status());
   handle('connect', () => service.connect());
   handle('listSessions', () => service.listSessions());

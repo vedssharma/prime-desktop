@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 const invoke = (method: string, ...args: unknown[]) => ipcRenderer.invoke(`prime:${method}`, ...args);
 contextBridge.exposeInMainWorld('prime', Object.freeze({
+  copyText: (text: string) => invoke('copyText', text),
   status: () => invoke('status'),
   connect: () => invoke('connect'),
   listSessions: () => invoke('listSessions'),

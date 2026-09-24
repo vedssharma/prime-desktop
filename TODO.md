@@ -108,7 +108,10 @@ cache. Cancel/ignore older reads and use monotonic transcript versions where ava
 **Acceptance:** Controlled out-of-order replies never remove newer messages or
 replace another session's displayed data.
 
-### [ ] 5. Repair Copy response in the actual Electron app — confirmed
+### [x] 5. Repair Copy response in the actual Electron app — confirmed
+
+**Implementation:** Added allowlisted, main-frame-validated clipboard IPC with input bound and visible error feedback. Native Electron clipboard test restores prior clipboard; no daemon mutations.
+
 
 **Where:** `electron/main.ts:70`; `src/App.tsx:25`.
 

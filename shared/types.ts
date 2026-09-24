@@ -35,6 +35,7 @@ export interface PrimeAPI {
   interruptSession(id: string): Promise<void>;
   renameSession(id: string, title: string): Promise<void>;
   deleteSession(id: string): Promise<void>;
+  copyText(text: string): Promise<void>;
   chooseDirectory(): Promise<string | null>;
   openDirectory(path: string): Promise<void>;
 }
