@@ -256,3 +256,28 @@ test('editing a draft back to the submitted text while pending still preserves t
   await selectSession(page, 'Alpha');
   await expect(composer(page)).toHaveValue('Same words, new draft revision');
 });
+
+
+test('modal blocks New session shortcut and background submission', async ({ page }) => {
+  await openApp(page);
+  await selectSession(page, 'Alpha');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.keyboard.press('Control+n');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(await page.locator('main').getAttribute('inert')).not.toBeNull();
+  expect(await page.locator('aside').getAttribute('inert')).not.toBeNull();
+  await expect(page.locator('.session-item[aria-current="page"]')).toContainText('Alpha session');
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => (window as any).__workflow.calls.filter((c: any[]) => ['create', 'send'].includes(c[0])))).toEqual([]);
+});
+
+test('send completion cannot steal modal focus', async ({ page }) => {
+  await openApp(page);
+  await selectSession(page, 'Alpha');
+  await composer(page).fill('Prompt');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await settleSend(page);
+  await expect.poll(() => page.evaluate(() => document.querySelector('[role="dialog"]')?.contains(document.activeElement))).toBe(true);
+  await expect(page.locator('main')).toHaveAttribute('inert', '');
+});

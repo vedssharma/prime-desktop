@@ -55,6 +55,8 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<'rename' | 'delete' | 'about' | 'settings' | null>(null);
+  const dialogRef = useRef(dialog);
+  dialogRef.current = dialog;
   const [appearance, setAppearance] = useState(loadAppearance);
   const [appearanceStorageError, setAppearanceStorageError] = useState(false);
   const dialogOpener = useRef<HTMLElement | null>(null);
@@ -70,10 +72,12 @@ export default function App() {
     return () => media.removeEventListener('change', update);
   }, [appearance]);
   useEffect(() => {
-    if (dialog !== 'settings') return;
+    if (!dialog) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogOpener.current = opener;
-    document.querySelector<HTMLElement>('.modal .modal-close')?.focus();
+    // Keep the form's autofocus target when present; otherwise focus Close.
+    const modal = document.querySelector<HTMLElement>('.modal');
+    if (!modal?.contains(document.activeElement)) modal?.querySelector<HTMLElement>('.modal-close')?.focus();
     return () => { if (dialogOpener.current?.isConnected) dialogOpener.current.focus(); };
   }, [dialog]);
   const [renameTitle, setRenameTitle] = useState('');
@@ -143,9 +147,9 @@ export default function App() {
 
   useEffect(() => { if (followBottom.current && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }, [messages, running]);
   useEffect(() => { if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 190)}px`; } }, [draft]);
-  const newSession = useCallback(() => { setActiveId(null); setSidebarOpen(false); setMenuOpen(false); setTimeout(() => textarea.current?.focus(), 50); }, []);
+  const newSession = useCallback(() => { setActiveId(null); setSidebarOpen(false); setMenuOpen(false); setTimeout(() => { if (!dialogRef.current && activeIdRef.current === null) textarea.current?.focus(); }, 50); }, []);
   useEffect(() => {
-    const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); newSession(); } if (event.key === 'Escape') { setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
+    const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); if (!dialogRef.current) newSession(); } if (event.key === 'Escape') { setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
     window.addEventListener('keydown', keydown); return () => window.removeEventListener('keydown', keydown);
   }, [newSession]);
 
@@ -170,7 +174,7 @@ export default function App() {
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || pending || !connection?.connected || (!activeId && !cwd)) return;
+    if (dialogRef.current || !text || pending || !connection?.connected || (!activeId && !cwd)) return;
     const target = activeId;
     const submittedKey = draftKey;
     const submittedRevision = draftEntry?.revision;
@@ -199,7 +203,7 @@ export default function App() {
       await refresh();
     } catch (err) {
       setError(accepted ? `Message accepted, but the view could not refresh: ${errorText(err)}. Do not resend it.` : errorText(err));
-    } finally { setPending(false); textarea.current?.focus(); }
+    } finally { setPending(false); } // Never move focus after an asynchronous operation.
   }
   async function stop() { if (!activeId) return; setPending(true); try { await window.prime.interruptSession(activeId); await refresh(); } catch (err) { setError(errorText(err)); } finally { setPending(false); } }
   async function confirmDialog(event: FormEvent) {
@@ -210,7 +214,7 @@ export default function App() {
 
   return <div className={`app-shell ${isElectron ? 'electron' : 'browser-preview'}`}>
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />}
-    <aside className={`sidebar ${sidebarOpen ? 'is-open' : ''}`}>
+    <aside inert={!!dialog} className={`sidebar ${sidebarOpen ? 'is-open' : ''}`}>
       <div className="window-drag"><div className="window-dots" aria-hidden="true"><i /><i /><i /></div><span>SESSION DOCK</span></div>
       <div className="brand"><DockMark /><span className="brand-name">Session Dock</span><button className="icon-button mobile-close" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)}><PanelLeftClose size={17} /></button></div>
       <button className="new-session-button" onClick={newSession}><Plus size={17} /><span>New session</span><kbd>⌘ N</kbd></button>
@@ -221,7 +225,7 @@ export default function App() {
       </nav>
       <div className="sidebar-bottom"><div className="local-note"><Terminal size={15} /><div><strong>Unofficial companion for Prime Agent</strong><span>Independent community project</span></div></div><button className="connection-button" onClick={reconnect} disabled={connecting} title={connection?.error || 'Reconnect to Prime Agent'}><span className={`status-dot ${connection?.connected ? 'connected' : ''}`} /><span>{connecting ? 'Connecting...' : connection?.connected ? 'Agent connected' : connection ? 'Agent disconnected' : 'Checking connection...'}</span>{connecting ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}</button><div className="sidebar-footer"><span>COMMUNITY BUILT</span><button className="icon-button" aria-label="Settings" title="Settings" onClick={() => setDialog('settings')}><Settings size={16} /></button><button className="icon-button" aria-label="About Session Dock" onClick={() => setDialog('about')}><CircleHelp size={16} /></button></div></div>
     </aside>
-    <main className="main-panel">
+    <main inert={!!dialog} className="main-panel">
       <header className="topbar"><div className="breadcrumb"><button className="icon-button sidebar-toggle" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={18} /></button><span className="breadcrumb-root">Workspace</span><span className="breadcrumb-slash">/</span><strong>{active?.title || 'New session'}</strong>{running && <span className="header-running"><span className="running-dot" />Working</span>}</div><div className="topbar-actions">{!isElectron && <span className="preview-badge">READ-ONLY PREVIEW</span>}<span className="local-badge"><span /> LOCAL</span>{active && <div className="session-menu"><button className="icon-button" aria-label="Session actions" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={20} /></button>{menuOpen && <><button className="menu-dismiss" aria-label="Close session actions" onClick={() => setMenuOpen(false)} /><div className="dropdown"><button onClick={() => { setRenameTitle(active.title); setDialog('rename'); setMenuOpen(false); }}><Pencil size={14} />Rename session</button><button onClick={() => { setMenuOpen(false); void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))); }}><FolderOpen size={14} />Reveal folder</button><button className="danger-text" onClick={() => { setDialog('delete'); setMenuOpen(false); }}><Trash2 size={14} />Delete session</button></div></>}</div>}<button className="icon-button help-button" aria-label="About this app" onClick={() => setDialog('about')}><CircleHelp size={18} /></button></div></header>
       {active && <div className="session-context"><button onClick={() => void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err)))} title={active.cwd}><Folder size={13} /><span>{active.cwd}</span></button><span className="context-separator" /><span><Zap size={12} />{active.model || 'CLI default'}</span></div>}
       {error && <div className="error-banner" role="alert"><CircleHelp size={16} /><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
