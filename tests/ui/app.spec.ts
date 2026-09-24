@@ -106,3 +106,18 @@ test('untrusted Markdown cannot execute HTML or load remote images', async ({ pa
   await expect(page.locator('.markdown img')).toHaveCount(0);
   expect(requests.some(url => url.includes('tracker.invalid'))).toBe(false);
 });
+
+
+test('uses independent branding and clearly disclaims upstream affiliation', async ({ page }) => {
+  await page.goto('/');
+  await expect(page).toHaveTitle('Session Dock');
+  await expect(page.locator('.brand')).toHaveText('Session Dock');
+  await expect(page.getByText('Unofficial companion for Prime Agent', { exact: true })).toBeVisible();
+  await expect(page.locator('.sidebar-footer')).toContainText('COMMUNITY BUILT');
+  await expect(page.locator('.sidebar-footer')).not.toContainText('PRIME INTELLECT');
+  await page.getByRole('button', { name: 'About Session Dock', exact: true }).click();
+  const about = page.getByRole('dialog');
+  await expect(about.locator('.about-logo')).toHaveText('Session Dock');
+  await expect(about).toContainText('not affiliated with or endorsed by Prime Intellect');
+  await expect(about).toContainText('Prime Agent is a separate project');
+});

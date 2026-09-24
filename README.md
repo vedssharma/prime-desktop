@@ -1,6 +1,8 @@
-# Prime Desktop
+# Session Dock
 
 An unofficial, community-built desktop companion for [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent). Built with Electron, React, and TypeScript.
+
+**Not affiliated with or endorsed by Prime Intellect.** Session Dock has its own name and icon; Prime Agent remains a separately installed dependency. The repository URL retains `prime-desktop` for continuity.
 
 ## Run locally
 
@@ -30,11 +32,13 @@ The browser preview deliberately has no access to the daemon. Use the Electron a
 
 ## macOS build
 
-An unsigned Apple Silicon app is generated at `release/mac-arm64/Prime Desktop.app`. Open it with:
+An unsigned Apple Silicon app is generated at `release/mac-arm64/Session Dock.app`. Open it with:
 
 ```sh
-open "release/mac-arm64/Prime Desktop.app"
+open "release/mac-arm64/Session Dock.app"
 ```
+
+The renamed app uses a new application ID and local preferences profile. Existing CLI sessions are unchanged; you may need to select your workspace and model again. Internal `PRIME_DESKTOP_*` environment variables remain supported for compatibility.
 
 Closing the window does not stop agent work. Use Stop in a session to interrupt it. Deleting a session stops its worker and removes its shared CLI history, not just the desktop entry.
 

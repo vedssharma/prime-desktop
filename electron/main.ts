@@ -58,7 +58,7 @@ function registerIPC() {
 function createWindow() {
   window = new BrowserWindow({
     width: 1360, height: 900, minWidth: 760, minHeight: 560,
-    title: 'Prime Desktop', backgroundColor: '#f6f7f3',
+    title: 'Session Dock', backgroundColor: '#f6f7f3',
     titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 20, y: 21 },
     webPreferences: { preload: path.join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
   });

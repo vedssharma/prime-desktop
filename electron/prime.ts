@@ -87,7 +87,7 @@ export class PrimeService {
     const socket = options.socketPath ?? process.env.PRIME_DESKTOP_SOCKET ?? join(tmpdir(), `prime-agent-${process.getuid?.() ?? 'user'}`, 'daemon.sock');
     this.transport = new DaemonTransport(socket, options.timeoutMs);
   }
-  private assertWritable() { if (this.options.readOnly) throw new Error('Prime Desktop is in read-only mode.'); }
+  private assertWritable() { if (this.options.readOnly) throw new Error('Session Dock is in read-only mode.'); }
   private async cli(): Promise<string> {
     if (this.executable) return this.executable;
     const explicit = this.options.executable ?? process.env.PRIME_AGENT_BIN;

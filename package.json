@@ -1,7 +1,7 @@
 {
-  "name": "prime-desktop",
+  "name": "session-dock",
   "version": "0.1.0",
-  "description": "A desktop companion for the Prime Agent CLI",
+  "description": "Session Dock \u2014 an unofficial desktop companion for Prime Agent CLI",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
@@ -37,8 +37,8 @@
     "vite": "^8.3.0"
   },
   "build": {
-    "appId": "ai.primeintellect.desktop",
-    "productName": "Prime Desktop",
+    "appId": "io.github.vedssharma.sessiondock",
+    "productName": "Session Dock",
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
