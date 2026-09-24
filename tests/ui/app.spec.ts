@@ -161,3 +161,12 @@ test('narrow sidebar is inert when closed and traps focus when open', async ({ p
   await expect(page.locator('aside')).toHaveAttribute('inert', '');
   await expect(page.getByRole('button', { name: 'Open sidebar', exact: true })).toBeFocused();
 });
+
+
+test('About exposes bundled third-party acknowledgements', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'About Session Dock', exact: true }).click();
+  await page.getByText('Third-party acknowledgements', { exact: true }).click();
+  await expect(page.locator('.third-party-notices pre')).toContainText('MIT');
+  await expect(page.locator('.third-party-notices pre')).toContainText('react');
+});

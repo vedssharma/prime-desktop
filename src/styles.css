@@ -494,3 +494,5 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 }
 
 @media(max-width:900px){.sidebar:not(.is-open){visibility:hidden}.brand{min-width:0}.brand .brand-name{font-size:20px}.sidebar .mobile-close{flex-shrink:0}}
+
+.third-party-notices{margin:16px 0}.third-party-notices summary{cursor:pointer;color:var(--accent-text)}.third-party-notices pre{max-height:230px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--surface-subtle);font-size:12px;color:var(--text)}

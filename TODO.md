@@ -202,7 +202,10 @@ models after automatic reconnection as well as manual reconnection.
 **Acceptance:** A fake CLI returning [] first and new models after login is reflected
 without restarting Electron; failures display actionable diagnostics.
 
-### [ ] 10. Include software licenses in distributed app artifacts — confirmed
+### [x] 10. Include software licenses in distributed app artifacts — confirmed
+
+**Implementation:** Build generates exact dependency/font/Electron notices and fails missing licenses. Project license and notices ship in app.asar; Chromium/Electron notices ship in resources. afterPack validates exact bytes. About exposes acknowledgements.4 notice tests,12 UI smoke tests and fresh archive verification passed.
+
 
 **Where:** `package.json:42–47`; `README.md` license section.
 
