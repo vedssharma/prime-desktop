@@ -4,6 +4,8 @@ import App from './App';
 import './styles.css';
 import { previewAPI } from './preview';
 import { applyAppearance, loadAppearance } from './appearance';
+import { applyDisplay, loadDisplay } from './DisplaySettings';
+applyDisplay(loadDisplay());
 applyAppearance(loadAppearance());
 if (!window.prime) window.prime = previewAPI;
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);

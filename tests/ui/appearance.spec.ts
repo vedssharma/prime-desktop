@@ -265,3 +265,21 @@ test('accent foreground and accent text keep readable contrast across themes and
     }
   }
 });
+
+
+test('readability settings persist and compact zoom-equivalent layout stays usable', async ({ page }) => {
+  await page.goto('/'); const dialog = await openSettings(page);
+  await dialog.getByRole('combobox', { name: 'Text size', exact: true }).selectOption('large');
+  await dialog.getByRole('combobox', { name: 'Density', exact: true }).selectOption('compact');
+  await page.keyboard.press('Escape'); await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-text-size', 'large');
+  await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
+  const size = await page.locator('.safety-note').evaluate(node => parseFloat(getComputedStyle(node).fontSize)); expect(size).toBeGreaterThanOrEqual(13);
+  // 1360x900 at 200% zoom has a roughly 680x450 CSS viewport.
+  await page.setViewportSize({ width: 680, height: 450 });
+  await page.getByRole('button', { name: 'Open sidebar', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  const bounds = await page.getByRole('dialog').boundingBox(); expect(bounds!.height).toBeLessThanOrEqual(450);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

@@ -262,7 +262,10 @@ A single global `pending` flag can disable Stop in another session while an oper
 is pending. Add per-session operation state, queue visibility, and clear uncertain-
 outcome recovery without automatically resending prompts.
 
-### [ ] 14. Make text sizing and status messages easier to read
+### [x] 14. Make text sizing and status messages easier to read
+
+**Implementation:** Raised meaningful guidance/status labels to11–12px, added persisted Large text and Comfortable/Compact density, and improved short/zoomed layouts. Added persistence and200%-equivalent viewport checks.
+
 
 Several secondary/status/safety labels are 7–9 px, including the no-sandbox warning
 and draft/send guidance. Add density/font-size settings, raise useful text minimums,

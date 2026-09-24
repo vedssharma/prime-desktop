@@ -500,3 +500,19 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 .connection-settings{margin-top:20px;border-top:1px solid var(--border);padding-top:16px}.connection-settings summary{cursor:pointer;color:var(--accent-text)}.connection-settings label{display:block;margin:12px 0}.connection-settings input{display:block;width:100%;padding:8px;color:var(--text);background:var(--surface);border:1px solid var(--border-strong);border-radius:5px}.model-search{width:95px;min-width:45px;border:1px solid var(--border);border-radius:4px;padding:4px;background:var(--surface);color:var(--text);font-size:11px}@media(max-width:1000px){.model-search{width:65px}}
 
 .queue-status{padding:8px 24px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)}.queue-status summary{cursor:pointer;color:var(--text)}.queue-status p{margin:8px 0}
+
+/* Readability: meaningful labels never use decorative microtype. */
+:root{--body-size:14px;--label-size:12px;--small-size:11px}
+:root[data-text-size="large"]{--body-size:17px;--label-size:15px;--small-size:13px}
+.markdown,.system-message,.tool-message pre,.composer textarea{font-size:var(--body-size)}
+.session-item-text>span,.connection-button,.starter-card strong,.model-control select,.folder-control,.dropdown button,.modal p,.modal input,.modal select,.modal button,.modal label,.settings-hint,.queue-status{font-size:var(--label-size)}
+.safety-note,.composer-caption,.composer-caption kbd,.session-item small,.session-item time,.local-note strong,.local-note span,.message-meta,.agent-label,.settings-error,.about-detail{font-size:var(--small-size)}
+.composer-caption{align-items:flex-start;flex-wrap:wrap}.safety-note{line-height:1.5}
+.display-settings{border-top:1px solid var(--border);padding-top:12px;margin-top:20px}.display-settings label{display:flex;justify-content:space-between;align-items:center;margin:12px 0}.display-settings select{padding:8px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:5px}
+:root[data-density="comfortable"] .session-item{padding-block:12px}
+:root[data-density="compact"] .session-item{padding-block:6px}
+.app-shell{min-height:0}.composer-controls{min-width:0;flex-wrap:wrap}.composer-toolbar{gap:8px}
+@media(max-height:600px){.main-footer{display:none}.composer-area{padding-bottom:10px}.composer textarea{max-height:100px}.welcome{padding-block:16px}.welcome-eyebrow,.hero-mark{display:none}}
+@media(max-width:600px){.topbar{padding-inline:12px}.starter-grid{grid-template-columns:1fr}.composer-area{padding-inline:12px}.content-scroll{min-width:0}.welcome{padding-inline:16px}.model-search{display:none}.session-context{padding-inline:12px}.topbar-actions .local-badge{display:none}.breadcrumb{min-width:0}.main-footer{display:none}}
+
+@media(max-height:600px){.sidebar{overflow-y:auto}.sidebar>*{flex-shrink:0}.sidebar .session-list{min-height:70px;flex-shrink:1}.sidebar .local-note{padding:7px;margin-bottom:6px}.sidebar .sidebar-search{margin-bottom:10px}.sidebar .sidebar-bottom{padding-top:6px}.sidebar .window-drag{min-height:30px;height:30px}.sidebar .brand{height:40px;margin-bottom:8px}}
