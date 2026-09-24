@@ -87,7 +87,9 @@ export class PrimeService {
     const socket = options.socketPath ?? process.env.PRIME_DESKTOP_SOCKET ?? join(tmpdir(), `prime-agent-${process.getuid?.() ?? 'user'}`, 'daemon.sock');
     this.transport = new DaemonTransport(socket, options.timeoutMs);
   }
-  private assertWritable() { if (this.options.readOnly) throw new Error('Session Dock is in read-only mode.'); }
+  private assertWritable(): never {
+    throw new Error('Read-only compatibility mode: this daemon cannot atomically guard session identity. Use the Prime Agent CLI for session changes until a supported identity-safe protocol is available.');
+  }
   private async cli(): Promise<string> {
     if (this.executable) return this.executable;
     const explicit = this.options.executable ?? process.env.PRIME_AGENT_BIN;
@@ -100,7 +102,7 @@ export class PrimeService {
   async status() {
     try {
       const hello = await this.transport.connect();
-      return { connected: true, version: text(hello.appVersion) || text(hello.version), home: this.home };
+      return { connected: true, version: text(hello.appVersion) || text(hello.version), home: this.home, readOnly: true, safetyReason: 'Read-only compatibility mode: session changes require an identity-safe daemon protocol. Use the CLI to create, send, stop, rename, or delete.' };
     } catch (error) {
       return { connected: false, error: error instanceof Error ? error.message : String(error), home: this.home };
     }
@@ -143,18 +145,17 @@ export class PrimeService {
     return raw;
   }
   async getMessages(id: string): Promise<Message[]> {
-    const raw = await this.lookup(id);
-    if (raw.activeSessionId) {
-      const data = await this.transport.request({ type: 'get_messages', activeSessionId: raw.activeSessionId });
-      if (!Array.isArray(data.messages)) throw new Error('Invalid daemon transcript.');
-      const state = await this.transport.request({ type: 'get_state', activeSessionId: raw.activeSessionId });
-      const messages = [...data.messages];
-      if (state.streamingMessage) messages.push(state.streamingMessage);
-      return normalizeMessages(messages);
-    }
-    if (!raw.sessionFile) return [];
+    // Runtime IDs are reusable, so use the catalog's persisted file and verify its header.
+    const raw = await this.lookup(id, true);
+    if (!raw.sessionFile) throw new Error('This session has no saved transcript. Open it in the CLI.');
     if ((await stat(raw.sessionFile)).size > 64 * 1024 * 1024) throw new Error('This saved transcript exceeds the 64 MiB desktop limit. Open it in the CLI.');
-    return normalizeMessages(parseSavedTranscript(await readFile(raw.sessionFile, 'utf8')));
+    const contents = await readFile(raw.sessionFile, 'utf8');
+    let header: WireRecord;
+    try { header = JSON.parse(contents.split('\n', 1)[0]); }
+    catch { throw new Error('Invalid saved session header.'); }
+    if (header?.type !== 'session' || header.id !== id) throw new Error('Session identity mismatch. Refusing to display another conversation.');
+    if (contents.split('\n').slice(1).some(line => { try { return JSON.parse(line)?.type === 'session'; } catch { return false; } })) throw new Error('Multiple session headers. Refusing an ambiguous transcript.');
+    return normalizeMessages(parseSavedTranscript(contents));
   }
   async listModels(): Promise<{ id: string; name: string }[]> {
     if (this.models) return this.models;
@@ -173,63 +174,12 @@ export class PrimeService {
     this.models = models;
     return models;
   }
-  async createSession(input: CreateInput): Promise<Session> {
-    this.assertWritable();
-    if (!input.prompt?.trim()) throw new Error('Enter a message.');
-    if (!isAbsolute(input.cwd) || !(await stat(input.cwd)).isDirectory()) throw new Error('Choose an existing working directory.');
-    const config: WireRecord = { cwd: input.cwd, agentDir: join(this.home, '.prime/agent') };
-    if (input.model) {
-      // Catalog IDs are provider/model. Explicitly override the provider too,
-      // because the daemon merges create config with its launch defaults.
-      const slash = input.model.indexOf('/');
-      if (slash > 0) {
-        config.provider = input.model.slice(0, slash);
-        config.model = input.model.slice(slash + 1);
-      } else config.model = input.model;
-    }
-    const raw = await this.transport.request({ type: 'create', lifecycle: 'resident', continueRecent: false, config }, 120_000);
-    const session = normalizeSession(raw);
-    if (!session.id || !raw.activeSessionId) throw new Error('Daemon returned an invalid new session.');
-    this.sessions.set(session.id, raw);
-    try { await this.transport.request({ type: 'prompt', activeSessionId: raw.activeSessionId, message: input.prompt, streamingBehavior: 'followUp' }); }
-    catch (error) { throw new Error(`Session created, but sending failed: ${error instanceof Error ? error.message : error}. Refresh and open the new session before retrying.`); }
-    return { ...session, status: 'running' };
-  }
-  private async activate(id: string): Promise<WireRecord> {
-    const raw = await this.lookup(id, true);
-    if (raw.activeSessionId) return raw;
-    const resumed = await this.transport.request({ type: 'create', lifecycle: 'resident', sessionPath: raw.sessionFile, continueRecent: false }, 120_000);
-    if (!resumed.activeSessionId) throw new Error('Could not resume session.');
-    this.sessions.set(id, resumed);
-    return resumed;
-  }
-  async sendMessage(id: string, message: string): Promise<void> {
-    this.assertWritable();
-    if (!message.trim()) throw new Error('Enter a message.');
-    const raw = await this.activate(id);
-    await this.transport.request({ type: 'prompt', activeSessionId: raw.activeSessionId, message, streamingBehavior: 'followUp' });
-  }
-  async interruptSession(id: string): Promise<void> {
-    this.assertWritable();
-    const raw = await this.lookup(id, true);
-    if (raw.activeSessionId) await this.transport.request({ type: 'abort', activeSessionId: raw.activeSessionId });
-  }
-  async renameSession(id: string, title: string): Promise<void> {
-    this.assertWritable();
-    if (!title.trim()) throw new Error('Session title cannot be empty.');
-    const raw = await this.lookup(id, true);
-    await this.transport.request(raw.activeSessionId ? { type: 'rename', activeSessionId: raw.activeSessionId, name: title.trim() } : { type: 'rename_saved_session', sessionPath: raw.sessionFile, name: title.trim() });
-    raw.sessionName = title.trim();
-  }
-  async deleteSession(id: string): Promise<void> {
-    this.assertWritable();
-    const raw = await this.lookup(id, true);
-    if (raw.activeSessionId) await this.transport.request({ type: 'kill', activeSessionId: raw.activeSessionId });
-    if (raw.sessionFile) {
-      const result = await this.transport.request({ type: 'delete_saved_session', sessionPath: raw.sessionFile });
-      if (result.ok === false) throw new Error(result.error ?? 'Could not delete saved session.');
-    }
-    this.sessions.delete(id);
-  }
+  // Fail closed before any create/resume/prompt/kill or saved-file mutation.
+  // Do not add an "unsafe override": an upstream dispatch-time identity contract is required.
+  async createSession(_input: CreateInput): Promise<Session> { return this.assertWritable(); }
+  async sendMessage(_id: string, _message: string): Promise<void> { this.assertWritable(); }
+  async interruptSession(_id: string): Promise<void> { this.assertWritable(); }
+  async renameSession(_id: string, _title: string): Promise<void> { this.assertWritable(); }
+  async deleteSession(_id: string): Promise<void> { this.assertWritable(); }
   close(): void { this.transport.close(); }
 }

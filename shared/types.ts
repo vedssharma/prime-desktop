@@ -17,6 +17,8 @@ export interface Message {
 export interface ModelOption { id: string; name: string; }
 export interface ConnectionStatus {
   connected: boolean;
+  readOnly?: boolean;
+  safetyReason?: string;
   version?: string;
   error?: string;
   home: string;

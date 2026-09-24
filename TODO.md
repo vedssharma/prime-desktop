@@ -46,6 +46,9 @@ resolving any pending request does not steal modal focus.
 
 ### [ ] 2. Bind every operation to the intended persistent session — confirmed race
 
+**Implementation:** Safety mitigation shipped: current daemon is explicitly read-only; every mutation fails before dispatch. Reads verify the saved header identity and never use reusable runtime IDs. Full write restoration is BLOCKED on an atomic upstream identity contract; see docs/daemon-safety.md.
+
+
 **Where:** `electron/prime.ts:136–153,198–229`.
 
 The app refreshes its catalog before a mutation, but then sends a reusable runtime

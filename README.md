@@ -4,6 +4,8 @@ An unofficial, community-built desktop companion for [Prime Agent](https://githu
 
 **Not affiliated with or endorsed by Prime Intellect.** Session Dock has its own name and icon; Prime Agent remains a separately installed dependency. The repository URL retains `prime-desktop` for continuity.
 
+> **Current safety limitation:** Prime Agent 0.9.5 is supported in read-only compatibility mode. Browse persisted sessions in the desktop; create/send/stop/rename/delete in the CLI. See [daemon safety](docs/daemon-safety.md). The workflow UI remains tested with simulated backends but is disabled for the installed unsafe protocol.
+
 ## Run locally
 
 Requirements: Node.js 22.12+ (or a current supported Node.js release), npm, and an installed, configured `prime-agent` CLI.
