@@ -163,7 +163,10 @@ sidebar overlay is open.
 
 **Acceptance:** At all supported widths, Tab visits only visible interactive controls.
 
-### [ ] 8. Preserve visible saved-transcript entries — confirmed
+### [x] 8. Preserve visible saved-transcript entries — confirmed
+
+**Implementation:** Selected-branch history now maps visible custom entries and branch/compaction summaries consistently with active message normalization. Hidden custom entries stay excluded; history before compaction is retained for display. Fixture parity test added.
+
 
 **Where:** `electron/prime.ts:32–46,53–73`.
 

@@ -58,3 +58,24 @@ test('saved transcript follows final branch and tolerates only an incomplete tra
   assert.throws(() => parseSavedTranscript('{broken}\n{}\n'), /invalid JSON/);
 });
 
+
+
+test('saved history preserves visible custom messages and summaries with active parity', () => {
+  const records = [
+    { type: 'session', id: 'session' },
+    { type: 'custom_message', id: 'a', parentId: null, display: true, content: 'Visible notice' },
+    { type: 'custom_message', id: 'b', parentId: 'a', display: false, content: 'Hidden notice' },
+    { type: 'branch_summary', id: 'c', parentId: 'b', summary: 'Branch details' },
+    { type: 'compaction', id: 'd', parentId: 'c', summary: 'Earlier context' },
+  ];
+  const saved = normalizeMessages(parseSavedTranscript(records.map(record => JSON.stringify(record)).join('\n')));
+  const live = normalizeMessages([
+    { id: 'a', role: 'custom', display: true, content: 'Visible notice' },
+    { id: 'b', role: 'custom', display: false, content: 'Hidden notice' },
+    { id: 'c', role: 'branchSummary', summary: 'Branch details' },
+    { id: 'd', role: 'compactionSummary', summary: 'Earlier context' },
+  ]);
+  assert.deepEqual(saved, live);
+  assert.equal(saved.length, 3);
+  assert.match(saved[2].content, /Context summary/);
+});

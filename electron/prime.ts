@@ -38,6 +38,7 @@ export function normalizeMessages(messages: WireRecord[]): Message[] {
     const role: Message['role'] = message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : ['toolResult', 'bashExecution'].includes(message.role) ? 'tool' : 'system';
     const blocks: WireRecord[] = Array.isArray(message.content) ? message.content : [];
     let content = typeof message.content === 'string' ? message.content : blocks.filter(block => block.type === 'text').map(block => text(block.text)).join('\n');
+    if (['branchSummary', 'compactionSummary'].includes(message.role)) content = `${message.role === 'branchSummary' ? 'Branch summary' : 'Context summary'}\n\n${text(message.summary)}`;
     if (message.role === 'bashExecution') content = `$ ${text(message.command)}\n${text(message.output)}`;
     if (message.errorMessage) content += `${content ? '\n\n' : ''}Error: ${message.errorMessage}`;
     if (blocks.some(block => block.type === 'image')) content += '\n[Image attachment]';
@@ -70,7 +71,13 @@ export function parseSavedTranscript(contents: string): WireRecord[] {
   }
   // Old v1 transcripts are linear and do not contain tree parent links.
   const tree = nodes.some(entry => 'parentId' in entry);
-  return (tree ? branch.reverse() : entries).filter(entry => entry.type === 'message' && entry.message).map(entry => ({ ...entry.message, id: entry.id }));
+  // Display the selected history branch, not just the provider's compacted context.
+  return (tree ? branch.reverse() : entries).flatMap(entry => {
+    if (entry.type === 'message' && entry.message) return [{ ...entry.message, id: entry.id }];
+    if (entry.type === 'custom_message') return [{ role: 'custom', content: entry.content, display: entry.display, timestamp: entry.timestamp, id: entry.id }];
+    if (entry.type === 'branch_summary' || entry.type === 'compaction') return [{ role: entry.type === 'branch_summary' ? 'branchSummary' : 'compactionSummary', summary: entry.summary, timestamp: entry.timestamp, id: entry.id }];
+    return [];
+  });
 }
 
 export class PrimeService {
