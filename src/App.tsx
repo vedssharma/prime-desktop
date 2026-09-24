@@ -82,6 +82,8 @@ export default function App() {
   }, [dialog]);
   const [renameTitle, setRenameTitle] = useState('');
   const [dialogPending, setDialogPending] = useState(false);
+  const dialogPendingRef = useRef(false);
+  dialogPendingRef.current = dialogPending;
   const textarea = useRef<HTMLTextAreaElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
@@ -150,7 +152,7 @@ export default function App() {
   useEffect(() => { if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 190)}px`; } }, [draft]);
   const newSession = useCallback(() => { setActiveId(null); setSidebarOpen(false); setMenuOpen(false); setTimeout(() => { if (!dialogRef.current && activeIdRef.current === null) textarea.current?.focus(); }, 50); }, []);
   useEffect(() => {
-    const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); if (!dialogRef.current) newSession(); } if (event.key === 'Escape') { setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
+    const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); if (!dialogRef.current) newSession(); } if (event.key === 'Escape') { if (dialogPendingRef.current) return; setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
     window.addEventListener('keydown', keydown); return () => window.removeEventListener('keydown', keydown);
   }, [newSession]);
 
@@ -208,9 +210,23 @@ export default function App() {
   }
   async function stop() { if (!activeId) return; setPending(true); try { await window.prime.interruptSession(activeId); await refresh(); } catch (err) { setError(errorText(err)); } finally { setPending(false); } }
   async function confirmDialog(event: FormEvent) {
-    event.preventDefault(); if (!activeId || dialogPending) return; setDialogPending(true);
-    try { if (dialog === 'delete') { await window.prime.deleteSession(activeId); setDrafts(previous => { const next = { ...previous }; delete next[activeId]; return next; }); newSession(); } else { if (!renameTitle.trim()) return; await window.prime.renameSession(activeId, renameTitle.trim()); } await refresh(); setDialog(null); }
-    catch (err) { setError(errorText(err)); } finally { setDialogPending(false); }
+    event.preventDefault();
+    if (!activeId || dialogPendingRef.current || readOnly) return;
+    const target = activeId, operation = dialog;
+    dialogPendingRef.current = true; setDialogPending(true);
+    try {
+      if (operation === 'delete') {
+        await window.prime.deleteSession(target);
+        setDrafts(previous => { const next = { ...previous }; delete next[target]; return next; });
+        if (activeIdRef.current === target) newSession();
+      } else if (operation === 'rename') {
+        if (!renameTitle.trim()) return;
+        await window.prime.renameSession(target, renameTitle.trim());
+      }
+      await refresh();
+      if (dialogRef.current === operation) setDialog(null);
+    } catch (err) { setError(`${operation === 'delete' ? 'Delete' : 'Rename'} session: ${errorText(err)}`); }
+    finally { dialogPendingRef.current = false; setDialogPending(false); }
   }
 
   return <div className={`app-shell ${isElectron ? 'electron' : 'browser-preview'}`}>

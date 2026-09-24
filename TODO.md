@@ -71,7 +71,10 @@ the race. Fail closed on an identity mismatch and recover the original saved ses
 for send/rename/abort/delete/read. No command affects a different persistent session,
 and no transcript from another session is shown under the original title.
 
-### [ ] 3. Keep pending rename/delete operations tied to their original view — confirmed
+### [x] 3. Keep pending rename/delete operations tied to their original view — confirmed
+
+**Implementation:** Pending dialogs cannot be dismissed with Escape. Completion captures the original target/operation and only navigates away if that session is still selected. Added delayed-delete regression.
+
 
 **Where:** `src/App.tsx:148,205–208,235`.
 

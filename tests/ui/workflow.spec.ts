@@ -281,3 +281,20 @@ test('send completion cannot steal modal focus', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => document.querySelector('[role="dialog"]')?.contains(document.activeElement))).toBe(true);
   await expect(page.locator('main')).toHaveAttribute('inert', '');
 });
+
+
+test('pending delete cannot be dismissed by Escape or background navigation', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => { (window as any).prime.deleteSession = () => new Promise<void>(resolve => { (window as any).__resolveDelete = resolve; }); });
+  await selectSession(page, 'Alpha');
+  await page.getByRole('button', { name: 'Session actions' }).click();
+  await page.getByRole('button', { name: 'Delete session', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Delete session', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  await expect(page.locator('aside')).toHaveAttribute('inert', '');
+  await page.evaluate(() => (window as any).__resolveDelete());
+  await expect(dialog).toHaveCount(0);
+});
