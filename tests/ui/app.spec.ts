@@ -147,3 +147,17 @@ test('long transcripts are windowed and draft edits preserve message DOM', async
   await page.getByRole('button', { name: /Load earlier messages/ }).click();
   await expect(page.locator('.message')).toHaveCount(200);
 });
+
+
+test('narrow sidebar is inert when closed and traps focus when open', async ({ page }) => {
+  await page.setViewportSize({ width: 760, height: 560 });
+  await page.goto('/');
+  await expect(page.locator('aside')).toHaveAttribute('inert', '');
+  await page.getByRole('button', { name: 'Open sidebar', exact: true }).click();
+  await expect(page.locator('aside')).not.toHaveAttribute('inert', '');
+  await expect(page.locator('main')).toHaveAttribute('inert', '');
+  for (let i = 0; i < 16; i++) { await page.keyboard.press('Tab'); expect(await page.locator('aside').evaluate(node => node.contains(document.activeElement))).toBe(true); }
+  await page.keyboard.press('Escape');
+  await expect(page.locator('aside')).toHaveAttribute('inert', '');
+  await expect(page.getByRole('button', { name: 'Open sidebar', exact: true })).toBeFocused();
+});

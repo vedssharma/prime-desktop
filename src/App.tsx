@@ -55,6 +55,20 @@ export default function App() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [narrow, setNarrow] = useState(() => matchMedia('(max-width: 900px)').matches);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarToggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const media = matchMedia('(max-width: 900px)');
+    const changed = () => { setNarrow(media.matches); if (!media.matches) setSidebarOpen(false); };
+    media.addEventListener('change', changed); return () => media.removeEventListener('change', changed);
+  }, []);
+  const drawerOpen = narrow && sidebarOpen;
+  useEffect(() => {
+    if (!drawerOpen) return;
+    sidebarRef.current?.querySelector<HTMLButtonElement>('.mobile-close')?.focus();
+    return () => { sidebarToggle.current?.focus(); };
+  }, [drawerOpen]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<'rename' | 'delete' | 'about' | 'settings' | null>(null);
   const dialogRef = useRef(dialog);
@@ -243,7 +257,7 @@ export default function App() {
 
   return <div className={`app-shell ${isElectron ? 'electron' : 'browser-preview'}`}>
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />}
-    <aside inert={!!dialog} className={`sidebar ${sidebarOpen ? 'is-open' : ''}`}>
+    <aside ref={sidebarRef} inert={!!dialog || (narrow && !sidebarOpen)} aria-hidden={narrow && !sidebarOpen ? true : undefined} onKeyDown={event => { if (drawerOpen && event.key === 'Tab') { const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input, [href]')).filter(node => node.getClientRects().length && getComputedStyle(node).display !== 'none'); const first = items[0], last = items.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); } } }} className={`sidebar ${sidebarOpen ? 'is-open' : ''}`}>
       <div className="window-drag"><div className="window-dots" aria-hidden="true"><i /><i /><i /></div><span>SESSION DOCK</span></div>
       <div className="brand"><DockMark /><span className="brand-name">Session Dock</span><button className="icon-button mobile-close" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)}><PanelLeftClose size={17} /></button></div>
       <button className="new-session-button" onClick={newSession}><Plus size={17} /><span>New session</span><kbd>⌘ N</kbd></button>
@@ -254,8 +268,8 @@ export default function App() {
       </nav>
       <div className="sidebar-bottom"><div className="local-note"><Terminal size={15} /><div><strong>Unofficial companion for Prime Agent</strong><span>Independent community project</span></div></div><button className="connection-button" onClick={reconnect} disabled={connecting} title={connection?.error || 'Reconnect to Prime Agent'}><span className={`status-dot ${connection?.connected ? 'connected' : ''}`} /><span>{connecting ? 'Connecting...' : connection?.connected ? 'Agent connected' : connection ? 'Agent disconnected' : 'Checking connection...'}</span>{connecting ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}</button><div className="sidebar-footer"><span>COMMUNITY BUILT</span><button className="icon-button" aria-label="Settings" title="Settings" onClick={() => setDialog('settings')}><Settings size={16} /></button><button className="icon-button" aria-label="About Session Dock" onClick={() => setDialog('about')}><CircleHelp size={16} /></button></div></div>
     </aside>
-    <main inert={!!dialog} className="main-panel">
-      <header className="topbar"><div className="breadcrumb"><button className="icon-button sidebar-toggle" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={18} /></button><span className="breadcrumb-root">Workspace</span><span className="breadcrumb-slash">/</span><strong>{active?.title || 'New session'}</strong>{running && <span className="header-running"><span className="running-dot" />Working</span>}</div><div className="topbar-actions">{!isElectron && <span className="preview-badge">READ-ONLY PREVIEW</span>}<span className="local-badge"><span /> LOCAL</span>{active && <div className="session-menu"><button className="icon-button" aria-label="Session actions" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={20} /></button>{menuOpen && <><button className="menu-dismiss" aria-label="Close session actions" onClick={() => setMenuOpen(false)} /><div className="dropdown"><button disabled={readOnly} onClick={() => { setRenameTitle(active.title); setDialog('rename'); setMenuOpen(false); }}><Pencil size={14} />Rename session</button><button onClick={() => { setMenuOpen(false); void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))); }}><FolderOpen size={14} />Reveal folder</button><button className="danger-text" disabled={readOnly} onClick={() => { setDialog('delete'); setMenuOpen(false); }}><Trash2 size={14} />Delete session</button></div></>}</div>}<button className="icon-button help-button" aria-label="About this app" onClick={() => setDialog('about')}><CircleHelp size={18} /></button></div></header>
+    <main inert={!!dialog || drawerOpen} className="main-panel">
+      <header className="topbar"><div className="breadcrumb"><button ref={sidebarToggle} className="icon-button sidebar-toggle" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)}><Menu size={18} /></button><span className="breadcrumb-root">Workspace</span><span className="breadcrumb-slash">/</span><strong>{active?.title || 'New session'}</strong>{running && <span className="header-running"><span className="running-dot" />Working</span>}</div><div className="topbar-actions">{!isElectron && <span className="preview-badge">READ-ONLY PREVIEW</span>}<span className="local-badge"><span /> LOCAL</span>{active && <div className="session-menu"><button className="icon-button" aria-label="Session actions" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><MoreHorizontal size={20} /></button>{menuOpen && <><button className="menu-dismiss" aria-label="Close session actions" onClick={() => setMenuOpen(false)} /><div className="dropdown"><button disabled={readOnly} onClick={() => { setRenameTitle(active.title); setDialog('rename'); setMenuOpen(false); }}><Pencil size={14} />Rename session</button><button onClick={() => { setMenuOpen(false); void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))); }}><FolderOpen size={14} />Reveal folder</button><button className="danger-text" disabled={readOnly} onClick={() => { setDialog('delete'); setMenuOpen(false); }}><Trash2 size={14} />Delete session</button></div></>}</div>}<button className="icon-button help-button" aria-label="About this app" onClick={() => setDialog('about')}><CircleHelp size={18} /></button></div></header>
       {active && <div className="session-context"><button onClick={() => void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err)))} title={active.cwd}><Folder size={13} /><span>{active.cwd}</span></button><span className="context-separator" /><span><Zap size={12} />{active.model || 'CLI default'}</span></div>}
       {readOnly && <div className="offline-banner" role="status">{connection?.safetyReason}</div>}
       {error && <div className="error-banner" role="alert"><CircleHelp size={16} /><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}

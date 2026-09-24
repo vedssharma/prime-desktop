@@ -492,3 +492,5 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
   .settings-preview { align-items: flex-start; gap: 9px; }
   .settings-footer .secondary-button, .settings-footer .primary-button { padding: 9px 10px; }
 }
+
+@media(max-width:900px){.sidebar:not(.is-open){visibility:hidden}.brand{min-width:0}.brand .brand-name{font-size:20px}.sidebar .mobile-close{flex-shrink:0}}

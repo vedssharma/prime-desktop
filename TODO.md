@@ -146,7 +146,10 @@ updates or lifecycle-aware polling rather than replacing whole transcripts.
 **Acceptance:** Composer updates do not reparse unchanged messages. Add a repeatable
 long-history performance test and verify tool expansion/scroll position stay stable.
 
-### [ ] 7. Remove the closed narrow sidebar from keyboard navigation — confirmed
+### [x] 7. Remove the closed narrow sidebar from keyboard navigation — confirmed
+
+**Implementation:** Closed narrow sidebar is inert/hidden, open drawer makes main panel inert and traps focus, and closing restores focus to its toggle. Added760px keyboard regression.
+
 
 **Where:** `src/styles.css:332–333`; `src/App.tsx:213–222`.
 
