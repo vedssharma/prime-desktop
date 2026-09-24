@@ -12,14 +12,16 @@
     "start": "electron .",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
-    "package": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
+    "package": "npm run check && npm run build && electron-builder --dir",
+    "dist": "npm run check && npm run build && electron-builder",
     "smoke": "npm run build && node scripts/smoke.mjs",
     "test:ui": "playwright test",
     "notices": "node scripts/generate-notices.mjs",
     "notices:check": "node scripts/generate-notices.mjs --check",
     "package:check": "node scripts/check-package.mjs",
-    "test:notices": "node --test tests/notices.test.mjs"
+    "test:notices": "node --test tests/notices.test.mjs",
+    "test:electron": "npm run build && node scripts/test-electron.mjs",
+    "check": "npm run typecheck && npm test && npm run test:notices && npm run test:ui"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

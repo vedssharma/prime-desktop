@@ -221,7 +221,10 @@ existing font notices. Keep the UI's third-party acknowledgements easy to find.
 **Acceptance:** Inspect a freshly built archive and confirm all required notices
 ship alongside bundled code. Recheck notices when dependencies change.
 
-### [ ] 11. Add CI and isolated Electron integration tests — coverage gap
+### [x] 11. Add CI and isolated Electron integration tests — coverage gap
+
+**Implementation:** CI added for macOS/Linux clean installs, tests, native Electron and package notice verification. Isolated Electron suite covers cold start, missing executable, reconnect, read-only mutation guards, clipboard, IPC input validation, navigation, picker bridge and detach. Packaging now depends on tests. Local native test passed; hosted CI/platform results must be monitored after push.
+
 
 **Where:** `package.json:15–16`; `scripts/smoke.mjs`; no tracked CI workflow.
 
