@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const now = new Date().toISOString();
     let sessions = [{ id: 'test-1', title: 'Explore the workspace', cwd: '/tmp/project', model: 'test/model', status: 'idle', createdAt: now, updatedAt: now }];
-    const messages: Record<string, any[]> = { 'test-1': [{ id: 'm1', role: 'user', content: 'Explain this project' }, { id: 'm2', role: 'assistant', content: '## Project overview\nA **small application**.\n\n[Documentation](https://example.com)' }, { id: 'm3', role: 'tool', toolName: 'ipython', content: 'print("hello")' }] };
+    const messages: Record<string, any[]> = { 'test-1': [{ id: 'm1', role: 'user', content: 'Explain this project' }, { id: 'm2', role: 'assistant', content: '## Project overview\nA **small application**.\n\n[Documentation](https://example.com)' }, { id: 'm3', role: 'tool', toolName: 'ipython', content: 'print("hello")' }, { id: 'm4', role: 'tool', toolName: 'ipython', content: 'print("again")' }, { id: 'm5', role: 'assistant', content: 'All done.' }] };
     (window as any).__calls = [];
     const log = (method: string, ...args: any[]) => (window as any).__calls.push([method, ...args]);
     (window as any).prime = {
@@ -24,14 +24,19 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('renders sessions, Markdown, and collapsed tool output', async ({ page }) => {
+test('renders sessions, Markdown, and tool calls condensed into one trace', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /good ideas deserve/i })).toBeVisible();
   await page.getByRole('button', { name: /Explore the workspace/ }).click();
   await expect(page.getByRole('heading', { name: 'Project overview' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Documentation' })).toHaveAttribute('target', '_blank');
-  await page.locator('summary').filter({ hasText: 'ipython' }).click();
-  await expect(page.locator('pre')).toContainText('print("hello")');
+  await expect(page.getByText('All done.')).toBeVisible();
+  await expect(page.locator('.trace')).toHaveCount(1);
+  await expect(page.locator('summary').filter({ hasText: 'ipython' }).first()).toBeHidden();
+  await page.locator('summary').filter({ hasText: 'Thought process' }).click();
+  await expect(page.locator('summary').filter({ hasText: 'ipython' })).toHaveCount(2);
+  await page.locator('summary').filter({ hasText: 'ipython' }).first().click();
+  await expect(page.locator('pre').first()).toContainText('print("hello")');
   await page.getByRole('textbox', { name: 'Message Prime' }).fill('Continue the review');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Continue the review', { exact: true })).toBeVisible();
@@ -127,10 +132,10 @@ test('copy uses native bridge and displays failures', async ({ page }) => {
   await page.addInitScript(() => { (window as any).prime.copyText = async () => { throw Error('Clipboard unavailable'); }; });
   await page.goto('/');
   await page.getByRole('button', { name: /Explore the workspace/ }).click();
-  await page.getByRole('button', { name: 'Copy response', exact: true }).click();
+  await page.getByRole('button', { name: 'Copy response', exact: true }).first().click();
   await expect(page.getByRole('alert')).toContainText('Copy failed: Clipboard unavailable');
   await page.evaluate(() => { (window as any).prime.copyText = async (text: string) => { (window as any).__copied = text; }; });
-  await page.getByRole('button', { name: 'Copy response', exact: true }).click();
+  await page.getByRole('button', { name: 'Copy response', exact: true }).first().click();
   await expect(page.getByRole('button', { name: 'Response copied', exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as any).__copied)).toContain('Project overview');
 });
