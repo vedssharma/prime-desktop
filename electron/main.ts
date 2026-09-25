@@ -129,7 +129,7 @@ else {
     event.preventDefault(); if (quitPending) return; quitPending = true;
     void (async () => {
       if (await service.hasOpenOwnedSessions()) {
-        const result = await dialog.showMessageBox({ type: 'warning', title: 'Quit Session Dock?', message: 'Quitting stops desktop-owned agent sessions.', detail: 'Their saved history remains available. Shared CLI sessions keep running.', buttons: ['Cancel', 'Quit and stop owned sessions'], defaultId: 0, cancelId: 0 });
+        const result = await dialog.showMessageBox({ type: 'warning', title: 'Quit Session Dock?', message: 'Quitting stops desktop-owned agent sessions.', detail: 'Saved history remains available. Shared CLI sessions and independent agents created by tools can keep running.', buttons: ['Cancel', 'Quit and stop owned sessions'], defaultId: 0, cancelId: 0 });
         if (result.response !== 1) { quitPending = false; return; }
       }
       await service.close(); quitReady = true; app.quit();

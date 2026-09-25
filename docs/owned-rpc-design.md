@@ -134,6 +134,26 @@ methods that **promote a client-owned worker to resident**. See
 `daemon-agent-connection.ts:1072`, `:1102`, and `withOwnedSessionPromotion`.
 Exposing these would invalidate this ownership argument.
 
+Native model tools do not implicitly promote the existing root:
+`AgentSession.handleRlmHeartbeatHostRequest` (`agent-session.ts:4117`) calls the
+worker's `createRlmHeartbeatForState` (`daemon-mode.ts:2265`), which updates the
+cron store and wakes the scheduler. It never sends the promotion flag.
+`promoteOwnedWorker` (`daemon-supervisor.ts:3430`) is the only code that clears the
+owner; its callers are the explicit promotion command and flagged RPC scheduling.
+Owned-worker cleanup also cancels its tree's scheduled jobs
+(`cancelEphemeralWorkerScheduledJobs`, `:7244`).
+
+There is a separate native capability: a depth-0 model can call
+`rlm.create_session`. `AgentSession.createRlmSession` (`agent-session.ts:13126`)
+invokes worker `createRlmRootSession` (`daemon-mode.ts:2822`). That creates and
+prompts a **different resident root**; it does not replace or promote the current
+owned root. The new root can outlive the desktop connection and its creation
+config does not inherit `noExtensions`. Thus closing a desktop session must not
+be described as stopping every independent agent the model may have created.
+No kernel host endpoint for replacing the current root via `new_session` or
+`switch_session` was found in this version. General same-user tool permissions
+remain outside the ownership boundary.
+
 State checks before writes and around transcript reads detect identity drift and
 close the connection. They are defense in depth, **not atomic dispatch-time
 identity guards**. RPC commands have no supported expected persistent-session ID

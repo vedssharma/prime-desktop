@@ -42,7 +42,7 @@ open "release/mac-arm64/Session Dock.app"
 
 The renamed app uses a new application ID and local preferences profile. Existing CLI sessions are unchanged; you may need to select your workspace and model again. Internal `PRIME_DESKTOP_*` environment variables remain supported for compatibility.
 
-On macOS, closing the window keeps the app and desktop-owned work running. **Quitting the app stops its desktop-owned sessions after confirmation.** On Linux, closing the last window requests quit. Shared CLI sessions keep running in either case. A forced process kill can leave an upstream cleanup grace period; it is not an instant cancellation guarantee.
+On macOS, closing the window keeps the app and desktop-owned work running. **Quitting the app stops its desktop-owned sessions after confirmation.** On Linux, closing the last window requests quit. Shared CLI sessions keep running in either case. A forced process kill can leave an upstream cleanup grace period; it is not an instant cancellation guarantee. Tools can also create independent resident agents, which can outlive the desktop session and must be managed separately in the CLI.
 
 ## What it does
 
