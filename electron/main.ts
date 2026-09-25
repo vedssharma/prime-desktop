@@ -10,7 +10,7 @@ const devURL = !app.isPackaged ? process.env.PRIME_DESKTOP_DEV_URL : undefined;
 if (devURL && devURL !== 'http://127.0.0.1:5173') throw new Error('Unexpected development URL');
 let service: PrimeService;
 let connectionConfig = { executable: '', socketPath: '' };
-function createService() { return new PrimeService({ executable: connectionConfig.executable || undefined, socketPath: connectionConfig.socketPath || undefined }); }
+function createService() { return new PrimeService({ desktopDir: path.join(app.getPath('userData'), 'owned-sessions'), executable: connectionConfig.executable || undefined, socketPath: connectionConfig.socketPath || undefined }); }
 async function validateConfig(value: unknown) {
   if (!value || typeof value !== 'object') throw new Error('Invalid connection settings');
   const record = value as Record<string, unknown>;
@@ -25,6 +25,7 @@ async function validateConfig(value: unknown) {
 }
 
 let window: BrowserWindow | null = null;
+let configuring = false;
 
 function text(value: unknown, field: string, max = 100_000): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max || value.includes('\0')) {
@@ -48,11 +49,16 @@ function registerIPC() {
   };
   handle('getConnectionConfig', () => connectionConfig);
   handle('configureConnection', async (value) => {
-    const next = await validateConfig(value);
-    const dir = app.getPath('userData'); await mkdir(dir, { recursive: true });
-    const file = path.join(dir, 'connection.json');
-    await writeFile(file + '.tmp', JSON.stringify(next), { mode: 0o600 }); await rename(file + '.tmp', file);
-    connectionConfig = next; service.close(); service = createService();
+    if (configuring) throw new Error('Connection settings are already changing.');
+    configuring = true;
+    try {
+      if (await service.hasOpenOwnedSessions()) throw new Error('Close desktop-owned sessions before changing connection settings. Shared CLI sessions are not affected.');
+      const next = await validateConfig(value);
+      const dir = app.getPath('userData'); await mkdir(dir, { recursive: true });
+      const file = path.join(dir, 'connection.json');
+      await writeFile(file + '.tmp', JSON.stringify(next), { mode: 0o600 }); await rename(file + '.tmp', file);
+      connectionConfig = next; await service.close(); service = createService();
+    } finally { configuring = false; }
   });
   handle('copyText', async (value) => { await clipboard.writeText(text(value, 'clipboard text', 4 * 1024 * 1024)); });
   handle('status', () => service.status());
@@ -61,11 +67,16 @@ function registerIPC() {
   handle('listModels', () => service.listModels());
   handle('getMessages', (id) => service.getMessages(text(id, 'session ID', 4096)));
   handle('createSession', async (value) => {
+    if (configuring) throw new Error('Wait for connection settings to finish changing.');
     if (!value || typeof value !== 'object') throw new Error('Invalid session');
     const input = value as Record<string, unknown>;
-    return service.createSession({ prompt: text(input.prompt, 'prompt'), cwd: await directory(input.cwd),
-      model: input.model === undefined ? undefined : text(input.model, 'model', 512) });
+    const cwd = await directory(input.cwd);
+    if (configuring) throw new Error('Connection settings changed before session creation. Try again.');
+    return service.createSession({ prompt: text(input.prompt, 'prompt'), cwd,
+      model: input.model === undefined ? undefined : text(input.model, 'model', 512), allowFileChanges: input.allowFileChanges === true });
   });
+  handle('setSessionModel', (id, model) => service.setSessionModel(text(id, 'session ID', 4096), text(model, 'model', 512)));
+  handle('closeOwnedSession', id => service.closeOwnedSession(text(id, 'session ID', 4096)));
   handle('sendMessage', (id, message) => service.sendMessage(text(id, 'session ID', 4096), text(message, 'message')));
   handle('interruptSession', (id) => service.interruptSession(text(id, 'session ID', 4096)));
   handle('renameSession', (id, title) => service.renameSession(text(id, 'session ID', 4096), text(title, 'title', 200)));
@@ -112,6 +123,16 @@ else {
     app.on('activate', () => { if (!window) createWindow(); });
   });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-  // Detach this UI only. The CLI daemon and resident sessions stay alive.
-  app.on('before-quit', () => service?.close());
+  let quitReady = false, quitPending = false;
+  app.on('before-quit', event => {
+    if (quitReady || !service) return;
+    event.preventDefault(); if (quitPending) return; quitPending = true;
+    void (async () => {
+      if (await service.hasOpenOwnedSessions()) {
+        const result = await dialog.showMessageBox({ type: 'warning', title: 'Quit Session Dock?', message: 'Quitting stops desktop-owned agent sessions.', detail: 'Their saved history remains available. Shared CLI sessions keep running.', buttons: ['Cancel', 'Quit and stop owned sessions'], defaultId: 0, cancelId: 0 });
+        if (result.response !== 1) { quitPending = false; return; }
+      }
+      await service.close(); quitReady = true; app.quit();
+    })().catch(() => { quitPending = false; });
+  });
 }

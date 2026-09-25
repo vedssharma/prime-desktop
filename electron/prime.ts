@@ -1,5 +1,8 @@
 import { execFile, spawn } from 'node:child_process';
 import { access, readFile, stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { OwnedRpcSession } from './owned-rpc.js';
+import { OwnedStore, type OwnedMetadata } from './owned-store.js';
 import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -8,10 +11,10 @@ import { DaemonTransport, type WireRecord } from './transport.js';
 import { readBoundedFile, isRecord } from './bounded-io.js';
 
 const exec = promisify(execFile);
-interface Session { id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; }
+interface Session { id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
 interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; }
-interface CreateInput { prompt: string; cwd: string; model?: string; }
-export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; }
+interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; }
+export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; }
 
 function text(value: unknown): string { return typeof value === 'string' ? value : ''; }
 function date(value: unknown): string | undefined {
@@ -85,6 +88,13 @@ export function parseSavedTranscript(contents: string): WireRecord[] {
 
 export class PrimeService {
   private transport: DaemonTransport;
+  private owned = new Map<string, { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord }>();
+  private store?: OwnedStore;
+  private initialized?: Promise<void>;
+  private ownedVersion?: Promise<{ allowed: boolean; reason?: string }>;
+  private closing = false;
+  private closingPromise?: Promise<void>;
+  private creations = new Set<Promise<Session>>();
   private sessions = new Map<string, WireRecord>();
   private options: PrimeOptions;
   private home: string;
@@ -93,6 +103,7 @@ export class PrimeService {
   private modelsLoading?: Promise<{ id: string; name: string }[]>;
   constructor(options: PrimeOptions = {}) {
     this.options = options;
+    if (options.desktopDir) this.store = new OwnedStore(options.desktopDir);
     this.home = options.home ?? homedir();
     const socket = options.socketPath ?? process.env.PRIME_DESKTOP_SOCKET ?? join(tmpdir(), `prime-agent-${process.getuid?.() ?? 'user'}`, 'daemon.sock');
     this.transport = new DaemonTransport(socket, options.timeoutMs);
@@ -100,6 +111,36 @@ export class PrimeService {
   private assertWritable(): never {
     throw new Error('Read-only compatibility mode: this daemon cannot atomically guard session identity. Use the Prime Agent CLI for session changes until a supported identity-safe protocol is available.');
   }
+  private async initializeOwned() {
+    if (!this.initialized) this.initialized = (async () => {
+      if (this.store) for (const metadata of await this.store.list()) this.owned.set(metadata.id, { metadata });
+    })();
+    await this.initialized;
+  }
+  private async ownedSupport() {
+    if (!this.store || this.options.readOnly) return { allowed: false, reason: 'Desktop-owned sessions are not enabled for this connection.' };
+    if (!this.ownedVersion) this.ownedVersion = (async () => {
+      try {
+        const { stdout } = await exec(await this.cli(), ['--version'], { timeout: 5000, maxBuffer: 8192 });
+        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(stdout.trim()) ? { allowed: true } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.' };
+      } catch { return { allowed: false, reason: 'Install Prime Agent 0.9.6 or check the CLI executable path in Settings.' }; }
+    })();
+    return this.ownedVersion;
+  }
+  private ownedSession(entry: { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string }): Session {
+    return { ...entry.metadata, model: entry.state?.model ? [entry.state.model.provider, entry.state.model.id].filter(Boolean).join('/') : entry.metadata.model,
+      status: entry.error ? 'error' : entry.state?.isStreaming || entry.state?.isCompacting || entry.state?.unfinishedActionCount > 0 ? 'running' : 'idle',
+      ownership: 'desktop', writable: !!entry.rpc?.alive && !this.closing, lifecycle: entry.rpc?.alive ? 'open' : 'closed' };
+  }
+  private async liveOwned(id: string) {
+    await this.initializeOwned();
+    if (this.closing) throw Error('Desktop sessions are closing.');
+    const entry = this.owned.get(id);
+    if (!entry) return this.assertWritable();
+    if (!entry.rpc?.alive) throw Error('This desktop session is closed. Its saved history is read-only. Start a new session to continue.');
+    return entry as typeof entry & { rpc: OwnedRpcSession };
+  }
+  async hasOpenOwnedSessions() { return this.creations.size > 0 || [...this.owned.values()].some(entry => entry.rpc?.alive); }
   private async cli(): Promise<string> {
     if (this.executable) return this.executable;
     const explicit = this.options.executable ?? process.env.PRIME_AGENT_BIN;
@@ -110,11 +151,13 @@ export class PrimeService {
     return 'prime-agent';
   }
   async status() {
+    const support = await this.ownedSupport();
     try {
       const hello = await this.transport.connect();
-      return { connected: true, version: text(hello.appVersion) || text(hello.version), home: this.home, readOnly: true, safetyReason: 'Read-only compatibility mode: session changes require an identity-safe daemon protocol. Use the CLI to create, send, stop, rename, or delete.' };
+      return { connected: true, version: text(hello.appVersion) || text(hello.version), home: this.home, readOnly: true, canCreateOwned: support.allowed,
+        ownedReason: support.reason, safetyReason: 'Shared CLI sessions are read-only. New desktop-owned sessions use an isolated RPC connection; they can change files with your user permissions.' };
     } catch (error) {
-      return { connected: false, error: error instanceof Error ? error.message : String(error), home: this.home };
+      return { connected: false, error: error instanceof Error ? error.message : String(error), home: this.home, readOnly: true, canCreateOwned: support.allowed, ownedReason: support.reason };
     }
   }
   async connect() {
@@ -134,16 +177,22 @@ export class PrimeService {
     return { connected: false, error: 'Could not connect. Run prime-agent in a terminal, then reconnect.', home: this.home };
   }
   async listSessions(): Promise<Session[]> {
-    const data = await this.transport.request({ type: 'list', all: true });
+    await this.initializeOwned();
+    for (const entry of this.owned.values()) {
+      if (entry.rpc && !entry.rpc.alive && !entry.error) entry.error = 'Owned process stopped. Saved history is read-only.';
+    }
+    let data: WireRecord;
+    try { data = await this.transport.request({ type: 'list', all: true }); }
+    catch (error) { if (this.owned.size || (await this.ownedSupport()).allowed) return [...this.owned.values()].map(entry => this.ownedSession(entry)); throw error; }
     if (!Array.isArray(data.sessions) || !data.sessions.every(isRecord)) throw new Error('Invalid daemon session list.');
     const next = new Map<string, WireRecord>();
     for (const raw of data.sessions) {
       if (raw.runtimeKind === 'subagent' || raw.rlmDepth > 0 || raw.parentSessionId) continue;
       const session = normalizeSession(raw);
-      if (session.id) next.set(session.id, raw);
+      if (session.id && ![...this.owned.values()].some(entry => entry.metadata.sessionId === session.id)) next.set(session.id, raw);
     }
     this.sessions = next;
-    return [...next.values()].map(normalizeSession).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return [...[...next.values()].map(raw => ({ ...normalizeSession(raw), ownership: 'shared' as const, writable: false })), ...[...this.owned.values()].map(entry => this.ownedSession(entry))].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
   private async lookup(id: string, refresh = false): Promise<WireRecord> {
     // Mutations re-resolve persistent IDs: a CLI can replace the runtime behind
@@ -155,8 +204,21 @@ export class PrimeService {
     return raw;
   }
   async getMessages(id: string): Promise<Message[]> {
+    await this.initializeOwned();
+    const entry = this.owned.get(id);
+    if (entry?.rpc?.alive) {
+      try {
+        const snapshot = await entry.rpc.refresh();
+        entry.state = snapshot.state;
+        const records = [...snapshot.messages];
+        if (entry.streaming && !records.some(message => message.role === entry.streaming?.role && message.timestamp === entry.streaming?.timestamp)) records.push(entry.streaming);
+        entry.messages = normalizeMessages(records);
+        return entry.messages;
+      } catch (error) { entry.error = error instanceof Error ? error.message : String(error); throw error; }
+    }
     // Runtime IDs are reusable, so use the catalog's persisted file and verify its header.
-    const raw = await this.lookup(id, true);
+    const raw = entry ? { sessionFile: entry.metadata.sessionFile } : await this.lookup(id, true);
+    const expectedId = entry?.metadata.sessionId ?? id;
     if (!raw.sessionFile) throw new Error('This session has no saved transcript. Open it in the CLI.');
     const metadata = await stat(raw.sessionFile);
     const cacheKey = JSON.stringify([id, raw.sessionFile, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs]);
@@ -166,7 +228,7 @@ export class PrimeService {
     let header: WireRecord;
     try { header = JSON.parse(contents.split('\n', 1)[0]); }
     catch { throw new Error('Invalid saved session header.'); }
-    if (header?.type !== 'session' || header.id !== id) throw new Error('Session identity mismatch. Refusing to display another conversation.');
+    if (header?.type !== 'session' || header.id !== expectedId) throw new Error('Session identity mismatch. Refusing to display another conversation.');
     if (contents.split('\n').slice(1).some(line => { try { return JSON.parse(line)?.type === 'session'; } catch { return false; } })) throw new Error('Multiple session headers. Refusing an ambiguous transcript.');
     const messages = normalizeMessages(parseSavedTranscript(contents));
     this.transcriptCache = { key: cacheKey, messages };
@@ -188,12 +250,72 @@ export class PrimeService {
     if (!models.length && stdout.trim() && !/no (?:available |configured )?models|provider\s+model/i.test(stdout)) throw new Error('Unrecognized CLI model catalog. Update the CLI or check model configuration.');
     return models;
   }
-  // Fail closed before any create/resume/prompt/kill or saved-file mutation.
-  // Do not add an "unsafe override": an upstream dispatch-time identity contract is required.
-  async createSession(_input: CreateInput): Promise<Session> { return this.assertWritable(); }
-  async sendMessage(_id: string, _message: string): Promise<void> { this.assertWritable(); }
-  async interruptSession(_id: string): Promise<void> { this.assertWritable(); }
-  async renameSession(_id: string, _title: string): Promise<void> { this.assertWritable(); }
-  async deleteSession(_id: string): Promise<void> { this.assertWritable(); }
-  close(): void { this.transport.close(); }
+  async createSession(input: CreateInput): Promise<Session> {
+    if (this.closing) throw Error('Desktop sessions are closing.');
+    const task = (async () => {
+      if (!(await this.ownedSupport()).allowed) return this.assertWritable();
+      if (input.allowFileChanges !== true) throw Error('Confirm that the agent may run tools and change files before starting.');
+      if (!input.prompt.trim() || input.prompt.trimStart().startsWith('/')) throw Error('Enter a plain-language prompt. Slash commands are not available for desktop-owned sessions.');
+      if (!isAbsolute(input.cwd) || !(await stat(input.cwd)).isDirectory()) throw Error('Choose an existing absolute workspace.');
+      if (this.closing) throw Error('Desktop sessions are closing.');
+      return this.createOwned(input);
+    })();
+    this.creations.add(task);
+    try { return await task; } finally { this.creations.delete(task); }
+  }
+  private async createOwned(input: CreateInput): Promise<Session> {
+    await this.initializeOwned(); await this.store!.initialize();
+    if (this.closing) throw Error('Desktop sessions are closing.');
+    const rpc = await OwnedRpcSession.launch({ executable: await this.cli(), cwd: input.cwd, sessionDir: this.store!.transcripts, model: input.model, socketPath: this.transport.socketPath });
+    const now = new Date().toISOString();
+    const metadata: OwnedMetadata = { id: `desktop-${randomUUID()}`, sessionId: rpc.id, sessionFile: rpc.sessionFile, cwd: input.cwd, title: input.prompt.trim().slice(0, 100), model: input.model ?? '', createdAt: now, updatedAt: now };
+    const entry = { metadata, rpc, state: {} as WireRecord, error: undefined as string | undefined, streaming: undefined as WireRecord | undefined };
+    try {
+      if (this.closing) throw Error('Desktop closed before the session started.');
+      await this.store!.save(metadata); this.owned.set(metadata.id, entry);
+      rpc.onEvent(event => {
+        if (event.type === 'agent_start') entry.state.isStreaming = true;
+        if (event.type === 'agent_end') { entry.state.isStreaming = false; entry.streaming = undefined; }
+        if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') entry.streaming = event.message;
+        if (event.type === 'message_end') entry.streaming = undefined;
+        metadata.updatedAt = new Date().toISOString();
+      });
+      if (this.closing) throw Error('Desktop closed before prompt admission.');
+      entry.state.isStreaming = true; await rpc.send(input.prompt);
+      return this.ownedSession(entry);
+    } catch (error) {
+      entry.error = error instanceof Error ? error.message : String(error);
+      // Never auto-retry an uncertain prompt. Retain the record and let the user inspect it.
+      if (!this.owned.has(metadata.id) || this.closing) await rpc.close();
+      throw Error(`Desktop session ${metadata.id} could not finish starting: ${entry.error}. Check its history before retrying.`);
+    }
+  }
+  async sendMessage(id: string, message: string): Promise<void> {
+    const entry = await this.liveOwned(id); await entry.rpc.send(message); entry.metadata.updatedAt = new Date().toISOString();
+    // Admission is success even if later state/transcript refresh fails. UI reads separately.
+  }
+  async interruptSession(id: string): Promise<void> { const entry = await this.liveOwned(id); await entry.rpc.abort(); }
+  async setSessionModel(id: string, model: string): Promise<void> {
+    const slash = model.indexOf('/'); if (slash < 1 || slash === model.length - 1) throw Error('Choose an available provider/model.');
+    const entry = await this.liveOwned(id); await entry.rpc.setModel(model.slice(0, slash), model.slice(slash + 1));
+    entry.state = (await entry.rpc.refresh()).state; entry.metadata.model = model; await this.store!.save(entry.metadata);
+  }
+  async renameSession(id: string, title: string): Promise<void> {
+    await this.initializeOwned(); const entry = this.owned.get(id); if (!entry) return this.assertWritable();
+    entry.metadata.title = title.trim().slice(0, 200); await this.store!.save(entry.metadata);
+  }
+  async closeOwnedSession(id: string): Promise<void> {
+    await this.initializeOwned(); const entry = this.owned.get(id); if (!entry) return this.assertWritable();
+    await entry.rpc?.close(); entry.rpc = undefined; entry.state = {}; await this.store!.save(entry.metadata);
+  }
+  async deleteSession(_id: string): Promise<void> { return this.assertWritable(); }
+  close(): Promise<void> {
+    if (this.closingPromise) return this.closingPromise;
+    this.closing = true; this.transport.close();
+    this.closingPromise = (async () => {
+      await Promise.allSettled([...this.creations]);
+      await Promise.allSettled([...this.owned.values()].map(entry => entry.rpc?.close()));
+    })();
+    return this.closingPromise;
+  }
 }

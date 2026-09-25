@@ -181,3 +181,21 @@ test('model search and setup guidance are available', async ({ page }) => {
   await expect(page.getByRole('textbox', { name: 'CLI executable' })).toBeVisible();
   await expect(page.getByRole('dialog')).toContainText('/login');
 });
+
+
+test('new owned sessions require trust and shared history stays read-only', async ({ page }) => {
+  await page.addInitScript(() => {
+    const api=(window as any).prime;
+    api.status=async()=>({connected:true,readOnly:true,canCreateOwned:true,home:'/tmp'});
+    const original=api.createSession;
+    api.createSession=async(input:any)=>({...await original(input),ownership:'desktop',writable:true,lifecycle:'open'});
+  });
+  await page.goto('/');
+  await page.getByRole('textbox',{name:'Message Prime'}).fill('Create owned session');
+  await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
+  await page.getByRole('checkbox',{name:/I trust this workspace/}).check();
+  await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:/Explore the workspace/}).click();
+  await page.getByRole('textbox',{name:'Message Prime'}).fill('Not allowed in shared session');
+  await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
+});

@@ -21,10 +21,10 @@ jobs:
       - run: npm run build
       - name: Native Electron (macOS)
         if: runner.os == 'macOS'
-        run: node scripts/test-electron.mjs
+        run: node scripts/test-electron.mjs && node scripts/test-owned-electron.mjs
       - name: Native Electron (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a node scripts/test-electron.mjs
+        run: xvfb-run -a node scripts/test-electron.mjs && xvfb-run -a node scripts/test-owned-electron.mjs
       - run: npx electron-builder --dir
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

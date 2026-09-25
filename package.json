@@ -20,12 +20,14 @@
     "notices:check": "node scripts/generate-notices.mjs --check",
     "package:check": "node scripts/check-package.mjs",
     "test:notices": "node --test tests/notices.test.mjs",
-    "test:electron": "npm run build && node scripts/test-electron.mjs",
+    "test:electron": "npm run build && node scripts/test-electron.mjs && node scripts/test-owned-electron.mjs",
     "check": "npm run typecheck && npm test && npm run test:notices && npm run test:release && npm run test:ui",
     "electron:install": "node node_modules/electron/install.js",
     "release:unsigned": "node scripts/release.mjs",
     "release:signed": "node scripts/release.mjs --signed",
-    "test:release": "node --test tests/release-policy.test.mjs"
+    "test:release": "node --test tests/release-policy.test.mjs",
+    "test:owned": "npm run build && node scripts/test-owned-electron.mjs",
+    "test:real-owned": "npm run build && node scripts/test-real-owned-rpc.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

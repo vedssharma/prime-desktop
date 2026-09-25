@@ -11,15 +11,17 @@ private screenshots are under ignored `artifacts/review/`, not intended for publ
 
 The numbered commits address each item in order. Items **2 and 13** remain blocked
 for full functionality: Prime Agent 0.9.5 has no atomic persistent-session identity
-precondition. The desktop intentionally runs in **read-only compatibility mode**;
-all session writes/queue mutations fail before dispatch. Persisted browsing, settings,
-clipboard, connection controls, and diagnostics remain available. Do not restore
+precondition. Existing shared CLI sessions intentionally remain **read-only**; their writes/queue mutations fail before dispatch. Verified CLI0.9.6 now supports **new desktop-owned RPC sessions** through a separate client-owned process/allowlist. Persisted browsing, settings, clipboard, connection controls, and diagnostics remain available. Closed desktop sessions are currently read-only. Do not restore
 writes with an unsafe override or another catalog preflight.
 
 Item **18** has release automation and tested unsigned builds, but actual Apple
 signing/notarization is unverified until private credentials are supplied. No public
 binary release is uploaded automatically. See `docs/daemon-safety.md` and
 `docs/releases.md` for the remaining requirements.
+
+## Owned-session follow-up
+
+The next roadmap added a source-verified owned RPC boundary, prompts/follow-ups, stop, idle model selection, explicit workspace trust, local history, quit confirmation, and guided provider login/model discovery. See `docs/owned-rpc-design.md` and `docs/writable-roadmap.md`. This does not fix the shared daemon protocol or create a filesystem sandbox.
 
 ## Original review validation
 

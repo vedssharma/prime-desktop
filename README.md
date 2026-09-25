@@ -4,7 +4,7 @@ An unofficial, community-built desktop companion for [Prime Agent](https://githu
 
 **Not affiliated with or endorsed by Prime Intellect.** Session Dock has its own name and icon; Prime Agent remains a separately installed dependency. The repository URL retains `prime-desktop` for continuity.
 
-> **Current safety limitation:** Prime Agent 0.9.5 is supported in read-only compatibility mode. Browse persisted sessions in the desktop; create/send/stop/rename/delete in the CLI. See [daemon safety](docs/daemon-safety.md). The workflow UI remains tested with simulated backends but is disabled for the installed unsafe protocol.
+> **Two session modes:** With verified Prime Agent **0.9.6**, new desktop-owned sessions can accept prompts, run tools, change files, stop, and switch models through an owned RPC connection. Existing shared CLI sessions remain read-only. This is control-routing isolation, **not a filesystem sandbox**. See [owned-session design](docs/owned-rpc-design.md). Other CLI versions do not enable desktop-owned writes until reviewed.
 
 ## Run locally
 
@@ -42,17 +42,19 @@ open "release/mac-arm64/Session Dock.app"
 
 The renamed app uses a new application ID and local preferences profile. Existing CLI sessions are unchanged; you may need to select your workspace and model again. Internal `PRIME_DESKTOP_*` environment variables remain supported for compatibility.
 
-Closing the window does not stop agent work. Use the CLI to stop or delete sessions while the desktop is in read-only compatibility mode.
+On macOS, closing the window keeps the app and desktop-owned work running. **Quitting the app stops its desktop-owned sessions after confirmation.** On Linux, closing the last window requests quit. Shared CLI sessions keep running in either case. A forced process kill can leave an upstream cleanup grace period; it is not an instant cancellation guarantee.
 
 ## What it does
 
-- Browse and search existing Prime Agent sessions.
+- Create desktop-owned sessions in trusted workspaces using your existing CLI credentials.
+- Send prompts/follow-ups, view streamed output, stop work, and change the model when idle.
+- Browse and search existing Prime Agent sessions without changing them.
 - Read conversations, Markdown responses, and tool output.
 - Copy responses through a validated native clipboard bridge.
 - Keep separate unsent drafts for each session while the app is open.
 - Remember the last workspace and model selection across launches.
 - Configure appearance, readability, and connection paths without changing CLI state.
-- Keep resident sessions running when the app closes, so you can return from the desktop or CLI.
+- Preserve saved desktop history when a session closes. Closed sessions are read-only in this first owned-session release; automatic resume and deletion are not offered.
 
 ## Appearance
 
@@ -71,7 +73,7 @@ These are desktop-only settings and do not change the CLI's theme.
 
 Drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. Only the new-session workspace path, model choice, and appearance settings are stored locally.
 
-The following workflow is retained for future identity-safe backends and tested with simulated sessions; it is disabled on the current daemon. During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
+This workflow is enabled only for open desktop-owned sessions on the verified CLI version; shared and closed sessions are read-only. During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
 
 ## Architecture
 
@@ -110,3 +112,30 @@ See [docs/releases.md](docs/releases.md) for architecture-specific app paths, na
 validation, checksum generation, and optional signing/notarization. Signing requires
 private credentials and has not been validated locally. Manual CI builds produce
 reviewable artifacts, not automatic public releases.
+
+## Providers and model selection
+
+Settings → **Providers & models** groups the available catalog by provider and offers
+instructions to run `prime-agent` and `/login`. Complete OAuth or key entry inside
+the CLI, then refresh models in the app. No API-key input, OAuth interception, or
+manual auth-file editing is implemented. Available models are not proof of valid
+credentials. An idle owned session can switch models from its selector; the CLI's
+saved default may change too. Shared sessions cannot be switched from this app.
+
+## Owned-session limits
+
+- Requires verified CLI 0.9.6 and explicit workspace trust before the first prompt.
+- Tools have your normal user permissions; they are not confined to the chosen folder.
+- Extensions are disabled and slash commands/navigation/scheduling are not exposed.
+- App-owned transcripts live under the app's `owned-sessions/transcripts` directory;
+  app display names are local metadata, not edits to shared CLI history.
+- Quitting closes owned processes and their work; closed history cannot yet be resumed.
+- Ambiguous admission or process loss is never retried automatically.
+- Workspace explorer/editor/diff approval and richer queue controls are future steps,
+  not included in this initial writable integration.
+
+`npm run test:electron` uses disposable simulated daemons/RPC processes, including a
+deterministic file write in a temporary workspace. It makes no LLM request.
+`npm run test:real-owned -- /absolute/path/to/prime-agent` is an opt-in, version-pinned,
+no-prompt ownership/lifecycle probe with a private temporary HOME and daemon. It
+verifies actual CLI owner isolation, not provider inference or tool correctness.

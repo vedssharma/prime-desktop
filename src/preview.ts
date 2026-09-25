@@ -10,6 +10,8 @@ export const previewAPI: PrimeAPI = {
   getMessages: async () => [],
   listModels: async () => [],
   createSession: desktopOnly,
+  setSessionModel: desktopOnly,
+  closeOwnedSession: desktopOnly,
   sendMessage: desktopOnly,
   interruptSession: desktopOnly,
   renameSession: desktopOnly,

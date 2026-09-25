@@ -6,6 +6,9 @@ export interface Session {
   status: 'idle' | 'running' | 'error';
   updatedAt: string;
   createdAt: string;
+  ownership?: 'shared' | 'desktop';
+  writable?: boolean;
+  lifecycle?: 'open' | 'closed';
 }
 export interface Message {
   id: string;
@@ -18,12 +21,14 @@ export interface ModelOption { id: string; name: string; }
 export interface ConnectionStatus {
   connected: boolean;
   readOnly?: boolean;
+  canCreateOwned?: boolean;
+  ownedReason?: string;
   safetyReason?: string;
   version?: string;
   error?: string;
   home: string;
 }
-export interface CreateSessionInput { prompt: string; cwd: string; model?: string; }
+export interface CreateSessionInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; }
 export interface ConnectionConfig { executable: string; socketPath: string; }
 export interface PrimeAPI {
   getConnectionConfig(): Promise<ConnectionConfig>;
@@ -33,6 +38,8 @@ export interface PrimeAPI {
   listSessions(): Promise<Session[]>;
   getMessages(id: string): Promise<Message[]>;
   listModels(): Promise<ModelOption[]>;
+  setSessionModel(id: string, model: string): Promise<void>;
+  closeOwnedSession(id: string): Promise<void>;
   createSession(input: CreateSessionInput): Promise<Session>;
   sendMessage(id: string, text: string): Promise<void>;
   interruptSession(id: string): Promise<void>;
