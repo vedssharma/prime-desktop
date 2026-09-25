@@ -186,3 +186,30 @@ test('model search and setup guidance are available', async ({ page }) => {
   await expect(page.getByRole('textbox', { name: 'CLI executable' })).toBeVisible();
   await expect(page.getByRole('dialog')).toContainText('/login');
 });
+
+test('a reply that arrives during a run is revealed progressively and followed to the bottom', async ({ page }) => {
+  await page.addInitScript(() => {
+    const api = (window as any).prime; const originalList = api.listSessions; const originalRead = api.getMessages;
+    let live: any[] | null = null; let running = false;
+    (window as any).__startRun = (content: string) => { running = true; live = [{ id: 'r1', role: 'user', content: 'Keep going' }, { id: 'r2', role: 'assistant', content }]; };
+    api.listSessions = async () => (await originalList()).map((s: any) => ({ ...s, status: running ? 'running' : 'idle' }));
+    api.getMessages = async (id: string) => [...await originalRead(id), ...(live || [])];
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Explore the workspace/ }).click();
+  // Messages present when a session opens are shown in full immediately.
+  await expect(page.getByText('All done.')).toBeVisible();
+  const reply = `${'word '.repeat(400)}THE-END`;
+  await page.evaluate(text => {
+    // Record every length the newest reply passes through while it is revealed.
+    const lengths: number[] = (window as any).__lengths = [];
+    new MutationObserver(() => { const nodes = document.querySelectorAll('.message.assistant .markdown'); const node = nodes[nodes.length - 1]; if (node?.textContent?.includes('word')) lengths.push(node.textContent.length); }).observe(document.querySelector('.conversation')!, { subtree: true, childList: true, characterData: true });
+    (window as any).__startRun(text);
+  }, reply);
+  const last = page.locator('.message.assistant .markdown').last();
+  await expect(last).toContainText('THE-END', { timeout: 10000 });
+  const lengths: number[] = await page.evaluate(() => (window as any).__lengths);
+  expect(lengths.filter(length => length < reply.length).length).toBeGreaterThan(3);
+  const gap = await page.locator('.content-scroll').evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);
+  expect(gap).toBeLessThan(100);
+});

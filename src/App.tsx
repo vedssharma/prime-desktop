@@ -10,6 +10,7 @@ import ThirdPartyNotices from './ThirdPartyNotices';
 import ConnectionSettings from './ConnectionSettings';
 import DisplaySettings from './DisplaySettings';
 import { groupConversation } from './trace';
+import { useRevealedText } from './reveal';
 import { applyAppearance, loadAppearance, saveAppearance, type Appearance } from './appearance';
 
 const isElectron = navigator.userAgent.includes('Electron');
@@ -22,12 +23,13 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
 const folderName = (path: string) => path.replace(/[\\/]$/, '').split(/[\\/]/).pop() || path || 'Choose a folder';
 const relativeTime = (value: string) => { const mins = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000)); return mins < 1 ? 'now' : mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 1440)}d`; };
 function DockMark({ className = '' }: { className?: string }) { return <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="7" y="4" width="18" height="15" rx="3" stroke="currentColor" strokeWidth="2.5" /><path d="m11 9 3 3-3 3m7 0h3M4 20v5a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3v-5M4 21h7l2 3h6l2-3h7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
-const MessageView = memo(function MessageView({ message }: { message: Message }) {
+const MessageView = memo(function MessageView({ message, animate = false }: { message: Message; animate?: boolean }) {
   const [copied, setCopied] = useState(false);
+  const revealed = useRevealedText(message.content, animate && message.role === 'assistant');
   const [copyError, setCopyError] = useState('');
   if (message.role === 'tool') return <details className="tool-message"><summary><Terminal size={14} /><span>{message.toolName || 'Tool call'}</span><ChevronRight size={14} /></summary><pre>{message.content || 'No output'}</pre></details>;
   if (message.role === 'system') return <div className="system-message"><CircleHelp size={14} /><span>{message.content}</span></div>;
-  return <article className={`message ${message.role}`}><div className={`message-avatar ${message.role === 'assistant' ? 'agent-avatar' : ''}`}>{message.role === 'assistant' ? <DockMark /> : 'Y'}</div><div className="message-body"><div className="message-meta"><strong>{message.role === 'assistant' ? 'Prime' : 'You'}</strong>{message.role === 'assistant' && <span className="agent-label">AGENT</span>}{message.timestamp && <time>{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}</div><div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>, img: ({ alt, src }) => <a href={src} target="_blank" rel="noreferrer">[Image: {alt || 'View image'}]</a> }}>{message.content}</ReactMarkdown></div>{message.role === 'assistant' && <button className="copy-message icon-button" aria-label={copied ? 'Response copied' : 'Copy response'} title="Copy response" onClick={() => { setCopyError(''); void window.prime.copyText(message.content).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(error => setCopyError(`Copy failed: ${errorText(error)}`)); }}>{copied ? <Check size={14} /> : <Copy size={14} />}</button>}{copyError && <p role="alert">{copyError}</p>}</div></article>;
+  return <article className={`message ${message.role}`}><div className={`message-avatar ${message.role === 'assistant' ? 'agent-avatar' : ''}`}>{message.role === 'assistant' ? <DockMark /> : 'Y'}</div><div className="message-body"><div className="message-meta"><strong>{message.role === 'assistant' ? 'Prime' : 'You'}</strong>{message.role === 'assistant' && <span className="agent-label">AGENT</span>}{message.timestamp && <time>{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}</div><div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>, img: ({ alt, src }) => <a href={src} target="_blank" rel="noreferrer">[Image: {alt || 'View image'}]</a> }}>{revealed}</ReactMarkdown></div>{message.role === 'assistant' && <button className="copy-message icon-button" aria-label={copied ? 'Response copied' : 'Copy response'} title="Copy response" onClick={() => { setCopyError(''); void window.prime.copyText(message.content).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(error => setCopyError(`Copy failed: ${errorText(error)}`)); }}>{copied ? <Check size={14} /> : <Copy size={14} />}</button>}{copyError && <p role="alert">{copyError}</p>}</div></article>;
 }, (a, b) => a.message.id === b.message.id && a.message.content === b.message.content && a.message.role === b.message.role && a.message.timestamp === b.message.timestamp && a.message.toolName === b.message.toolName);
 const TraceView = memo(function TraceView({ steps, active }: { steps: Message[]; active: boolean }) {
   const calls = steps.filter(step => step.role === 'tool').length;
@@ -120,6 +122,8 @@ export default function App() {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
+  // Content growing below the viewport is not the user scrolling away; only an upward scroll stops following.
+  const lastScrollTop = useRef(0);
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
   const active = sessions.find(session => session.id === activeId);
@@ -130,11 +134,15 @@ export default function App() {
   const currentCwd = active?.cwd || cwd;
   const refresh = useCallback(async () => { const list = await window.prime.listSessions(); setSessions(list); }, []);
   const messageRead = useRef(0);
+  // Message IDs present when the session was opened; only replies that arrive later are revealed progressively.
+  const knownIds = useRef<Set<string> | null>(null);
+  const conversationRef = useRef<HTMLDivElement>(null);
+  const pollMessagesNow = useRef<() => void>(() => {});
   const readMessages = useCallback(async (id: string) => {
     const request = ++messageRead.current;
     try {
       const next = await window.prime.getMessages(id);
-      if (request === messageRead.current && activeIdRef.current === id) setMessages(next);
+      if (request === messageRead.current && activeIdRef.current === id) { knownIds.current ??= new Set(next.map(message => message.id)); setMessages(next); }
     } catch (error) {
       if (request === messageRead.current && activeIdRef.current === id) throw error;
     }
@@ -186,7 +194,7 @@ export default function App() {
   }, [running]);
 
   useEffect(() => {
-    setMessages([]); setVisibleMessages(100); followBottom.current = true;
+    setMessages([]); setVisibleMessages(100); followBottom.current = true; knownIds.current = null;
     if (!activeId) { setLoadingMessages(false); return; }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -194,13 +202,24 @@ export default function App() {
     async function poll() {
       try { await readMessages(activeId!); }
       catch (err) { if (!cancelled) setError(errorText(err)); }
-      finally { if (!cancelled) { setLoadingMessages(false); timer = setTimeout(poll, runningRef.current ? 2000 : 10000); } }
+      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, runningRef.current ? 600 : 10000); } }
     }
+    // A run that starts while the idle timer is pending must not wait out the idle delay.
+    pollMessagesNow.current = () => { if (!cancelled) { clearTimeout(timer); void poll(); } };
     void poll();
-    return () => { cancelled = true; ++messageRead.current; clearTimeout(timer); };
+    return () => { cancelled = true; ++messageRead.current; clearTimeout(timer); pollMessagesNow.current = () => {}; };
   }, [activeId, readMessages]);
 
   useEffect(() => { if (followBottom.current && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }, [messages, running]);
+  useEffect(() => { if (running) pollMessagesNow.current(); }, [running]);
+  useEffect(() => {
+    // Keep following the bottom while a revealed reply grows, not just when messages change.
+    const node = conversationRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => { if (followBottom.current && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [activeId]);
   useEffect(() => { if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 190)}px`; } }, [draft]);
   const newSession = useCallback(() => { setActiveId(null); setSidebarOpen(false); setMenuOpen(false); setTimeout(() => { if (!dialogRef.current && activeIdRef.current === null) textarea.current?.focus(); }, 50); }, []);
   useEffect(() => {
@@ -307,8 +326,8 @@ export default function App() {
       {readOnly && <div className="offline-banner" role="status">{connection?.safetyReason}</div>}
       {error && <div className="error-banner" role="alert"><CircleHelp size={16} /><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
       {connection && !connection.connected && <div className="offline-banner"><span>{connection.error || 'Connect to Prime Agent to start working.'}</span><button onClick={reconnect} disabled={connecting}>{connecting ? 'Connecting...' : 'Start agent service / reconnect'}<RefreshCw size={12} className={connecting ? 'spin' : ''} /></button></div>}
-      <div className={`content-scroll ${!activeId ? 'welcome-scroll' : ''}`} ref={scrollArea} onScroll={() => { const node = scrollArea.current; if (node) followBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100; }}>
-        {!activeId ? <div className="welcome"><div className="welcome-eyebrow"><span className="eyebrow-line" /> A LITTLE DIRECTION. ENDLESS POSSIBILITY.</div><div className="hero-mark"><DockMark /><span className="hero-spark"><Sparkles size={15} /></span></div><h1>Good ideas deserve<br />a <span>head start.</span></h1><p className="welcome-description">Meet your coding partner. Build, explore, and solve<br className="desktop-break" /> together, right from your workspace.</p><div className="starter-heading"><span>WHERE SHOULD WE START?</span><span>Pick a direction, or make your own<ArrowDown size={12} /></span></div><div className="starter-grid">{starters.map(({ icon: Icon, title, description, prompt }) => <button key={title} className="starter-card" onClick={() => { setDraft(prompt); textarea.current?.focus(); }}><div className="starter-icon"><Icon size={20} /><ArrowRight size={15} /></div><strong>{title}</strong><span>{description}</span></button>)}</div><div className="welcome-note"><FolderOpen size={14} /><span>Start in a project folder. Prime takes it from there.</span></div><p className="safety-note">Agents run with your user permissions. No sandbox.</p></div> : <div className="conversation">{loadingMessages ? <div className="messages-loading"><LoaderCircle size={18} className="spin" />Loading conversation...</div> : messages.length ? <>{messages.length > visibleMessages && <button className="secondary-button" onClick={() => { followBottom.current = false; setVisibleMessages(count => count + 100); }}>Load earlier messages ({messages.length - visibleMessages})</button>}{conversationItems.map((item, index) => item.kind === 'trace' ? <TraceView key={item.id} steps={item.steps} active={running && index === conversationItems.length - 1} /> : <MessageView key={item.message.id} message={item.message} />)}</> : <div className="conversation-empty"><MessageSquare size={26} /><h2>The next step is yours.</h2><p>Send a message to continue this session.</p></div>}{running && <div className="working-indicator" role="status"><DockMark /><span>Prime is working<span className="thinking-dots"><i /><i /><i /></span></span></div>}{active?.status === 'error' && <div className="system-message"><CircleHelp size={15} />This session stopped with an error. Send a message to try again.</div>}</div>}
+      <div className={`content-scroll ${!activeId ? 'welcome-scroll' : ''}`} ref={scrollArea} onScroll={() => { const node = scrollArea.current; if (!node) return; if (node.scrollHeight - node.scrollTop - node.clientHeight < 100) followBottom.current = true; else if (node.scrollTop < lastScrollTop.current) followBottom.current = false; lastScrollTop.current = node.scrollTop; }}>
+        {!activeId ? <div className="welcome"><div className="welcome-eyebrow"><span className="eyebrow-line" /> A LITTLE DIRECTION. ENDLESS POSSIBILITY.</div><div className="hero-mark"><DockMark /><span className="hero-spark"><Sparkles size={15} /></span></div><h1>Good ideas deserve<br />a <span>head start.</span></h1><p className="welcome-description">Meet your coding partner. Build, explore, and solve<br className="desktop-break" /> together, right from your workspace.</p><div className="starter-heading"><span>WHERE SHOULD WE START?</span><span>Pick a direction, or make your own<ArrowDown size={12} /></span></div><div className="starter-grid">{starters.map(({ icon: Icon, title, description, prompt }) => <button key={title} className="starter-card" onClick={() => { setDraft(prompt); textarea.current?.focus(); }}><div className="starter-icon"><Icon size={20} /><ArrowRight size={15} /></div><strong>{title}</strong><span>{description}</span></button>)}</div><div className="welcome-note"><FolderOpen size={14} /><span>Start in a project folder. Prime takes it from there.</span></div><p className="safety-note">Agents run with your user permissions. No sandbox.</p></div> : <div className="conversation" ref={conversationRef}>{loadingMessages ? <div className="messages-loading"><LoaderCircle size={18} className="spin" />Loading conversation...</div> : messages.length ? <>{messages.length > visibleMessages && <button className="secondary-button" onClick={() => { followBottom.current = false; setVisibleMessages(count => count + 100); }}>Load earlier messages ({messages.length - visibleMessages})</button>}{conversationItems.map((item, index) => item.kind === 'trace' ? <TraceView key={item.id} steps={item.steps} active={running && index === conversationItems.length - 1} /> : <MessageView key={item.message.id} message={item.message} animate={!!knownIds.current && !knownIds.current.has(item.message.id)} />)}</> : <div className="conversation-empty"><MessageSquare size={26} /><h2>The next step is yours.</h2><p>Send a message to continue this session.</p></div>}{running && <div className="working-indicator" role="status"><DockMark /><span>Prime is working<span className="thinking-dots"><i /><i /><i /></span></span></div>}{active?.status === 'error' && <div className="system-message"><CircleHelp size={15} />This session stopped with an error. Send a message to try again.</div>}</div>}
       </div>
       <div className={`composer-area ${!activeId ? 'welcome-composer' : ''}`}><form className={`composer ${pending ? 'is-pending' : ''}`} onSubmit={submit}><label className="sr-only" htmlFor="prompt">Message Prime</label><textarea id="prompt" ref={textarea} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} placeholder={running ? 'Queue a follow-up for after this work...' : activeId ? 'What’s next? Ask Prime anything...' : 'What would you like to work on?'} rows={2} /><div className="composer-toolbar"><div className="composer-controls"><button type="button" className="folder-control" onClick={() => { if (active) void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))); else void chooseFolder(); }} title={currentCwd || 'Choose project folder'}><Folder size={14} /><span>{folderName(currentCwd)}</span>{!active && <ChevronDown size={12} />}</button><span className="control-divider" />{!active && <input className="model-search" aria-label="Search models" placeholder="Find model…" value={modelSearch} onChange={event => setModelSearch(event.target.value)} />}<label className="model-control"><Zap size={13} /><span className="sr-only">Model</span><select aria-label="Model" value={active ? active.model || '' : model} disabled={!!active} onChange={event => setModel(event.target.value)}><option value="">CLI default</option>{!active && model && !models.some(choice => choice.id === model) && <option value={model}>{model} (saved selection)</option>}{active?.model && !models.some(choice => choice.id === active.model) && <option value={active.model}>{active.model}</option>}{models.filter(choice => choice.id === model || `${choice.id} ${choice.name}`.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}</select>{!active && <ChevronDown size={11} />}</label></div><div className="send-controls">{pending && <span className="sending-label">Sending...</span>}{running && <button type="button" className="send-button stop-button" aria-label="Stop generation" title="Stop generation" onClick={stop} disabled={pending || readOnly || !connection?.connected}><Square size={13} fill="currentColor" /></button>}<button className="send-button" type="submit" aria-label={running ? 'Queue follow-up' : 'Send message'} title={running ? 'Queue for after current work (Enter)' : 'Send message (Enter)'} disabled={readOnly || !draft.trim() || pending || !connection?.connected || (!active && !cwd)}>{pending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={19} />}</button></div></div></form><div className="composer-caption"><span role="status" title={notice}><span className="privacy-dot" />{notice || (running ? 'Follow-ups wait until current work finishes.' : 'Drafts stay in memory, not on disk.')}</span><span><kbd>↵</kbd> {running ? 'to queue' : 'to send'} <span className="caption-dot">·</span> <kbd>shift ↵</kbd> for a new line</span></div></div>
       <footer className="main-footer"><span>MADE FOR YOUR NEXT BIG THING.</span><span>Build with intention.<DockMark /></span></footer>
