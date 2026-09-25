@@ -247,6 +247,19 @@ h1>span:after{content:'';position:absolute;bottom:-3px;height:4px;left:0;right:0
 .tool-message summary>svg:last-child{margin-left:auto;transition:transform .15s}
 .tool-message[open] summary>svg:last-child{transform:rotate(90deg)}
 .tool-message pre{border-top:1px solid var(--border);margin:0;padding:14px;max-height:350px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px;line-height:1.8;color:var(--muted)}
+.trace{border:1px solid var(--border);border-radius:6px;margin:14px 0 20px 42px;color:var(--muted);background:var(--surface-subtle)}
+.trace>summary{display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 12px;font-size:10px;list-style:none}
+.trace>summary::-webkit-details-marker{display:none}
+.trace>summary>svg:first-child{color:var(--accent-text);flex-shrink:0}
+.trace-title{color:var(--text)}
+.trace-count{opacity:.8}
+.trace>summary>svg:last-child{margin-left:auto;transition:transform .15s}
+.trace[open]>summary>svg:last-child{transform:rotate(90deg)}
+.trace-steps{border-top:1px solid var(--border);padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-height:480px;overflow:auto}
+.trace-steps .tool-message{margin:0;background:var(--surface)}
+.trace-steps .system-message{margin:0}
+.trace-note.markdown{font-size:var(--small-size);color:var(--muted)}
+.trace-note>:first-child{margin-top:0}.trace-note>:last-child{margin-bottom:0}
 .system-message{display:flex;align-items:flex-start;gap:8px;font-size:10px;color:var(--warning);padding:10px 13px;margin:15px 0;border:1px solid var(--warning-border);border-radius:6px;background:var(--warning-surface);white-space:pre-wrap;overflow-wrap:anywhere}
 .system-message>svg{flex-shrink:0}
 .working-indicator{display:flex;align-items:center;gap:13px;color:var(--accent-text);font-size:11px;padding:0 0 16px}
@@ -389,7 +402,8 @@ h1{font-size:36px;letter-spacing:-1.6px}
 .message{gap:10px}
 .markdown{font-size:11px}
 .message-avatar{width:25px;height:25px}
-.tool-message{margin-left:35px}
+.tool-message,.trace{margin-left:35px}
+.trace-steps .tool-message{margin-left:0}
 .error-banner{margin:10px 16px 0;font-size:10px}
 .offline-banner{padding:9px 16px;font-size:9px}
 .session-context{padding:9px 16px;font-size:9px}

@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const now = new Date().toISOString();
     let sessions = [{ id: 'test-1', title: 'Explore the workspace', cwd: '/tmp/project', model: 'test/model', status: 'idle', createdAt: now, updatedAt: now }];
-    const messages: Record<string, any[]> = { 'test-1': [{ id: 'm1', role: 'user', content: 'Explain this project' }, { id: 'm2', role: 'assistant', content: '## Project overview\nA **small application**.\n\n[Documentation](https://example.com)' }, { id: 'm3', role: 'tool', toolName: 'ipython', content: 'print("hello")' }] };
+    const messages: Record<string, any[]> = { 'test-1': [{ id: 'm1', role: 'user', content: 'Explain this project' }, { id: 'm2', role: 'assistant', content: '## Project overview\nA **small application**.\n\n[Documentation](https://example.com)' }, { id: 'm3', role: 'tool', toolName: 'ipython', content: 'print("hello")' }, { id: 'm4', role: 'tool', toolName: 'ipython', content: 'print("again")' }, { id: 'm5', role: 'assistant', content: 'All done.' }] };
     (window as any).__calls = [];
     const log = (method: string, ...args: any[]) => (window as any).__calls.push([method, ...args]);
     (window as any).prime = {
@@ -24,14 +24,19 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('renders sessions, Markdown, and collapsed tool output', async ({ page }) => {
+test('renders sessions, Markdown, and tool calls condensed into one trace', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /good ideas deserve/i })).toBeVisible();
   await page.getByRole('button', { name: /Explore the workspace/ }).click();
   await expect(page.getByRole('heading', { name: 'Project overview' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Documentation' })).toHaveAttribute('target', '_blank');
-  await page.locator('summary').filter({ hasText: 'ipython' }).click();
-  await expect(page.locator('pre')).toContainText('print("hello")');
+  await expect(page.getByText('All done.')).toBeVisible();
+  await expect(page.locator('.trace')).toHaveCount(1);
+  await expect(page.locator('summary').filter({ hasText: 'ipython' }).first()).toBeHidden();
+  await page.locator('summary').filter({ hasText: 'Thought process' }).click();
+  await expect(page.locator('summary').filter({ hasText: 'ipython' })).toHaveCount(2);
+  await page.locator('summary').filter({ hasText: 'ipython' }).first().click();
+  await expect(page.locator('pre').first()).toContainText('print("hello")');
   await page.getByRole('textbox', { name: 'Message Prime' }).fill('Continue the review');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Continue the review', { exact: true })).toBeVisible();
@@ -127,10 +132,10 @@ test('copy uses native bridge and displays failures', async ({ page }) => {
   await page.addInitScript(() => { (window as any).prime.copyText = async () => { throw Error('Clipboard unavailable'); }; });
   await page.goto('/');
   await page.getByRole('button', { name: /Explore the workspace/ }).click();
-  await page.getByRole('button', { name: 'Copy response', exact: true }).click();
+  await page.getByRole('button', { name: 'Copy response', exact: true }).first().click();
   await expect(page.getByRole('alert')).toContainText('Copy failed: Clipboard unavailable');
   await page.evaluate(() => { (window as any).prime.copyText = async (text: string) => { (window as any).__copied = text; }; });
-  await page.getByRole('button', { name: 'Copy response', exact: true }).click();
+  await page.getByRole('button', { name: 'Copy response', exact: true }).first().click();
   await expect(page.getByRole('button', { name: 'Response copied', exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as any).__copied)).toContain('Project overview');
 });
@@ -198,4 +203,31 @@ test('new owned sessions require trust and shared history stays read-only', asyn
   await page.getByRole('button',{name:/Explore the workspace/}).click();
   await page.getByRole('textbox',{name:'Message Prime'}).fill('Not allowed in shared session');
   await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeDisabled();
+});
+
+test('a reply that arrives during a run is revealed progressively and followed to the bottom', async ({ page }) => {
+  await page.addInitScript(() => {
+    const api = (window as any).prime; const originalList = api.listSessions; const originalRead = api.getMessages;
+    let live: any[] | null = null; let running = false;
+    (window as any).__startRun = (content: string) => { running = true; live = [{ id: 'r1', role: 'user', content: 'Keep going' }, { id: 'r2', role: 'assistant', content }]; };
+    api.listSessions = async () => (await originalList()).map((s: any) => ({ ...s, status: running ? 'running' : 'idle' }));
+    api.getMessages = async (id: string) => [...await originalRead(id), ...(live || [])];
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Explore the workspace/ }).click();
+  // Messages present when a session opens are shown in full immediately.
+  await expect(page.getByText('All done.')).toBeVisible();
+  const reply = `${'word '.repeat(400)}THE-END`;
+  await page.evaluate(text => {
+    // Record every length the newest reply passes through while it is revealed.
+    const lengths: number[] = (window as any).__lengths = [];
+    new MutationObserver(() => { const nodes = document.querySelectorAll('.message.assistant .markdown'); const node = nodes[nodes.length - 1]; if (node?.textContent?.includes('word')) lengths.push(node.textContent.length); }).observe(document.querySelector('.conversation')!, { subtree: true, childList: true, characterData: true });
+    (window as any).__startRun(text);
+  }, reply);
+  const last = page.locator('.message.assistant .markdown').last();
+  await expect(last).toContainText('THE-END', { timeout: 10000 });
+  const lengths: number[] = await page.evaluate(() => (window as any).__lengths);
+  expect(lengths.filter(length => length < reply.length).length).toBeGreaterThan(3);
+  const gap = await page.locator('.content-scroll').evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);
+  expect(gap).toBeLessThan(100);
 });
