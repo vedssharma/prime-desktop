@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 const dir=await mkdtemp(path.join(tmpdir(),'dock-owned-e2e-'));
 const cli=path.join(dir,'prime-agent');await copyFile('tests/fixtures/owned-cli.mjs',cli);await chmod(cli,0o700);
-const app=await electron.launch({args:['.',`--user-data-dir=${path.join(dir,'profile')}`],env:{...process.env,PRIME_AGENT_BIN:cli,PRIME_DESKTOP_SOCKET:path.join(dir,'absent.sock'),PRIME_DESKTOP_DEV_URL:''}});
+const executable=process.env.PRIME_DESKTOP_EXECUTABLE ? path.resolve(process.env.PRIME_DESKTOP_EXECUTABLE) : undefined;
+const app=await electron.launch({...(executable ? {executablePath:executable,args:[`--user-data-dir=${path.join(dir,'profile')}`]} : {args:['.',`--user-data-dir=${path.join(dir,'profile')}`]}),env:{...process.env,PRIME_AGENT_BIN:cli,PRIME_DESKTOP_SOCKET:path.join(dir,'absent.sock'),PRIME_DESKTOP_DEV_URL:''}});
 try {
  const page=await app.firstWindow();page.setDefaultTimeout(10000);await page.waitForFunction(()=>!!window.prime);
  expect((await page.evaluate(()=>window.prime.status())).canCreateOwned).toBe(true);

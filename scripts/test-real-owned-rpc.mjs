@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import assert from 'node:assert/strict';
 
 const binary = process.argv[2];
-if (!binary) throw Error('Usage: node probe.mjs /absolute/prime-agent [report.json]');
+if (!binary) throw Error('Usage: node scripts/test-real-owned-rpc.mjs /absolute/prime-agent [report.json]');
 const directory = await mkdtemp(join(tmpdir(), 'sd-rpc-probe-'));
 const home = join(directory, 'home'), agentDir = join(directory, 'agent'), sessions = join(directory, 'sessions');
 const socketPath = join(directory, 'd.sock');
