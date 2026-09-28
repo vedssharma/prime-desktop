@@ -75,3 +75,16 @@ test('accepted follow-ups persist owned-session activity across a relaunch', asy
   finally{await reopened.close();}
  }finally{await service.close();await rm(dir,{recursive:true,force:true});}
 });
+
+test('a failed CLI version check is retried on reconnect, without a restart', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-recheck-'));const cli=join(dir,'prime-agent');
+ const daemon=await fakeDaemon(()=>({sessions:[]}));
+ const service=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:daemon.socketPath});
+ try {
+  assert.equal((await service.status()).canCreateOwned,false);
+  await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+  assert.equal((await service.status()).canCreateOwned,false); // Background polls reuse a recent failure.
+  assert.equal((await service.connect()).canCreateOwned,true);
+  assert.equal((await service.status()).canCreateOwned,true);
+ }finally{await service.close();await daemon.close();await rm(dir,{recursive:true,force:true});}
+});

@@ -91,7 +91,7 @@ export class PrimeService {
   private owned = new Map<string, { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord }>();
   private store?: OwnedStore;
   private initialized?: Promise<void>;
-  private ownedVersion?: Promise<{ allowed: boolean; reason?: string }>;
+  private ownedVersion?: Promise<{ allowed: boolean; reason?: string; checkedAt: number }>;
   private closing = false;
   private closingPromise?: Promise<void>;
   private creations = new Set<Promise<Session>>();
@@ -117,13 +117,20 @@ export class PrimeService {
     })();
     await this.initialized;
   }
-  private async ownedSupport() {
+  private async ownedSupport(recheck = false): Promise<{ allowed: boolean; reason?: string }> {
     if (!this.store || this.options.readOnly) return { allowed: false, reason: 'Desktop-owned sessions are not enabled for this connection.' };
+    // A verified CLI stays verified. A failed check is retried (immediately on an explicit
+    // reconnect, otherwise at most every 30 seconds), so installing or upgrading needs no restart.
+    const previous = this.ownedVersion;
+    if (previous) {
+      const result = await previous;
+      if (!result.allowed && this.ownedVersion === previous && (recheck || Date.now() - result.checkedAt > 30_000)) this.ownedVersion = undefined;
+    }
     if (!this.ownedVersion) this.ownedVersion = (async () => {
       try {
         const { stdout } = await exec(await this.cli(), ['--version'], { timeout: 5000, maxBuffer: 8192 });
-        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(stdout.trim()) ? { allowed: true } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.' };
-      } catch { return { allowed: false, reason: 'Install Prime Agent 0.9.6 or check the CLI executable path in Settings.' }; }
+        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(stdout.trim()) ? { allowed: true, checkedAt: Date.now() } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.', checkedAt: Date.now() };
+      } catch { return { allowed: false, reason: 'Install Prime Agent 0.9.6 or check the CLI executable path in Settings.', checkedAt: Date.now() }; }
     })();
     return this.ownedVersion;
   }
@@ -150,8 +157,8 @@ export class PrimeService {
     }
     return 'prime-agent';
   }
-  async status() {
-    const support = await this.ownedSupport();
+  async status(recheck = false) {
+    const support = await this.ownedSupport(recheck);
     try {
       const hello = await this.transport.connect();
       return { connected: true, version: text(hello.appVersion) || text(hello.version), home: this.home, readOnly: true, canCreateOwned: support.allowed,
@@ -161,7 +168,7 @@ export class PrimeService {
     }
   }
   async connect() {
-    const current = await this.status();
+    const current = await this.status(true);
     if (current.connected || this.options.readOnly || !/ENOENT|ECONNREFUSED/.test(current.error ?? '')) return current;
     // Explicit user reconnect may start the supervisor, never a session or an LLM request.
     const child = spawn(await this.cli(), ['--mode', 'daemon', '--daemon-socket', this.transport.socketPath], { detached: true, stdio: 'ignore', cwd: this.home });
