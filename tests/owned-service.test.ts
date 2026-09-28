@@ -57,3 +57,21 @@ test('shutdown tracks creation before startup preflights finish', async () => {
   await service.close();await rejection;assert.equal(await service.hasOpenOwnedSessions(),false);
  }finally{await service.close();await rm(dir,{recursive:true,force:true});}
 });
+
+test('accepted follow-ups persist owned-session activity across a relaunch', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-activity-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const options={executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent')};
+ const service=new PrimeService(options);
+ try {
+  const session=await service.createSession({cwd:dir,prompt:'First',allowFileChanges:true});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  await service.sendMessage(session.id,'Later follow-up');
+  const live=(await service.listSessions()).find(s=>s.id===session.id)!;
+  assert(live.updatedAt>session.createdAt);
+  await service.close();
+  const reopened=new PrimeService(options);
+  try { assert.equal((await reopened.listSessions()).find(s=>s.id===session.id)?.updatedAt,live.updatedAt); }
+  finally{await reopened.close();}
+ }finally{await service.close();await rm(dir,{recursive:true,force:true});}
+});

@@ -279,6 +279,8 @@ export class PrimeService {
         if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') entry.streaming = event.message;
         if (event.type === 'message_end') entry.streaming = undefined;
         metadata.updatedAt = new Date().toISOString();
+        // Persist activity at the end of each run so history sorts correctly after a relaunch.
+        if (event.type === 'agent_end') void this.persistActivity(metadata);
       });
       if (this.closing) throw Error('Desktop closed before prompt admission.');
       entry.state.isStreaming = true; await rpc.send(input.prompt);
@@ -293,6 +295,11 @@ export class PrimeService {
   async sendMessage(id: string, message: string): Promise<void> {
     const entry = await this.liveOwned(id); await entry.rpc.send(message); entry.metadata.updatedAt = new Date().toISOString();
     // Admission is success even if later state/transcript refresh fails. UI reads separately.
+    await this.persistActivity(entry.metadata);
+  }
+  /** Best effort: a metadata write failure must never turn an accepted operation into an error. */
+  private persistActivity(metadata: OwnedMetadata): Promise<void> {
+    return this.store ? this.store.save(metadata).catch(() => {}) : Promise.resolve();
   }
   async interruptSession(id: string): Promise<void> { const entry = await this.liveOwned(id); await entry.rpc.abort(); }
   async setSessionModel(id: string, model: string): Promise<void> {
