@@ -91,7 +91,7 @@ export class PrimeService {
   private owned = new Map<string, { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord }>();
   private store?: OwnedStore;
   private initialized?: Promise<void>;
-  private ownedVersion?: Promise<{ allowed: boolean; reason?: string }>;
+  private ownedVersion?: Promise<{ allowed: boolean; reason?: string; checkedAt: number }>;
   private closing = false;
   private closingPromise?: Promise<void>;
   private creations = new Set<Promise<Session>>();
@@ -117,13 +117,20 @@ export class PrimeService {
     })();
     await this.initialized;
   }
-  private async ownedSupport() {
+  private async ownedSupport(recheck = false): Promise<{ allowed: boolean; reason?: string }> {
     if (!this.store || this.options.readOnly) return { allowed: false, reason: 'Desktop-owned sessions are not enabled for this connection.' };
+    // A verified CLI stays verified. A failed check is retried (immediately on an explicit
+    // reconnect, otherwise at most every 30 seconds), so installing or upgrading needs no restart.
+    const previous = this.ownedVersion;
+    if (previous) {
+      const result = await previous;
+      if (!result.allowed && this.ownedVersion === previous && (recheck || Date.now() - result.checkedAt > 30_000)) this.ownedVersion = undefined;
+    }
     if (!this.ownedVersion) this.ownedVersion = (async () => {
       try {
         const { stdout } = await exec(await this.cli(), ['--version'], { timeout: 5000, maxBuffer: 8192 });
-        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(stdout.trim()) ? { allowed: true } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.' };
-      } catch { return { allowed: false, reason: 'Install Prime Agent 0.9.6 or check the CLI executable path in Settings.' }; }
+        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(stdout.trim()) ? { allowed: true, checkedAt: Date.now() } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.', checkedAt: Date.now() };
+      } catch { return { allowed: false, reason: 'Install Prime Agent 0.9.6 or check the CLI executable path in Settings.', checkedAt: Date.now() }; }
     })();
     return this.ownedVersion;
   }
@@ -150,8 +157,8 @@ export class PrimeService {
     }
     return 'prime-agent';
   }
-  async status() {
-    const support = await this.ownedSupport();
+  async status(recheck = false) {
+    const support = await this.ownedSupport(recheck);
     try {
       const hello = await this.transport.connect();
       return { connected: true, version: text(hello.appVersion) || text(hello.version), home: this.home, readOnly: true, canCreateOwned: support.allowed,
@@ -161,7 +168,7 @@ export class PrimeService {
     }
   }
   async connect() {
-    const current = await this.status();
+    const current = await this.status(true);
     if (current.connected || this.options.readOnly || !/ENOENT|ECONNREFUSED/.test(current.error ?? '')) return current;
     // Explicit user reconnect may start the supervisor, never a session or an LLM request.
     const child = spawn(await this.cli(), ['--mode', 'daemon', '--daemon-socket', this.transport.socketPath], { detached: true, stdio: 'ignore', cwd: this.home });
@@ -268,7 +275,7 @@ export class PrimeService {
     if (this.closing) throw Error('Desktop sessions are closing.');
     const rpc = await OwnedRpcSession.launch({ executable: await this.cli(), cwd: input.cwd, sessionDir: this.store!.transcripts, model: input.model, socketPath: this.transport.socketPath });
     const now = new Date().toISOString();
-    const metadata: OwnedMetadata = { id: `desktop-${randomUUID()}`, sessionId: rpc.id, sessionFile: rpc.sessionFile, cwd: input.cwd, title: input.prompt.trim().slice(0, 100), model: input.model ?? '', createdAt: now, updatedAt: now };
+    const metadata: OwnedMetadata = { id: `desktop-${randomUUID()}`, sessionId: rpc.id, sessionFile: rpc.sessionFile, cwd: input.cwd, title: input.prompt.replace(/\s+/g, ' ').trim().slice(0, 100), model: input.model ?? '', createdAt: now, updatedAt: now };
     const entry = { metadata, rpc, state: {} as WireRecord, error: undefined as string | undefined, streaming: undefined as WireRecord | undefined };
     try {
       if (this.closing) throw Error('Desktop closed before the session started.');
@@ -279,6 +286,8 @@ export class PrimeService {
         if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') entry.streaming = event.message;
         if (event.type === 'message_end') entry.streaming = undefined;
         metadata.updatedAt = new Date().toISOString();
+        // Persist activity at the end of each run so history sorts correctly after a relaunch.
+        if (event.type === 'agent_end') void this.persistActivity(metadata);
       });
       if (this.closing) throw Error('Desktop closed before prompt admission.');
       entry.state.isStreaming = true; await rpc.send(input.prompt);
@@ -293,6 +302,11 @@ export class PrimeService {
   async sendMessage(id: string, message: string): Promise<void> {
     const entry = await this.liveOwned(id); await entry.rpc.send(message); entry.metadata.updatedAt = new Date().toISOString();
     // Admission is success even if later state/transcript refresh fails. UI reads separately.
+    await this.persistActivity(entry.metadata);
+  }
+  /** Best effort: a metadata write failure must never turn an accepted operation into an error. */
+  private persistActivity(metadata: OwnedMetadata): Promise<void> {
+    return this.store ? this.store.save(metadata).catch(() => {}) : Promise.resolve();
   }
   async interruptSession(id: string): Promise<void> { const entry = await this.liveOwned(id); await entry.rpc.abort(); }
   async setSessionModel(id: string, model: string): Promise<void> {
