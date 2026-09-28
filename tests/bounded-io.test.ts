@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { JsonlDecoder, readBoundedFile } from '../electron/bounded-io.js';
+import { JsonlDecoder, isRecord, readBoundedFile } from '../electron/bounded-io.js';
 import { DaemonTransport } from '../electron/transport.js';
 import { parseSavedTranscript } from '../electron/prime.js';
 
@@ -39,4 +39,19 @@ test('FIFO transcript is rejected without waiting for a writer', { skip: process
   const dir = await mkdtemp(join(tmpdir(), 'fifo-')); const fifo = join(dir, 'transcript');
   try { await promisify(execFile)('mkfifo', [fifo]); await assert.rejects(readBoundedFile(fifo), /regular file/); }
   finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('JSONL framing strips CRLF, skips blank lines, splits batched chunks, and recovers after an overflow', () => {
+  const lines: string[] = []; const decoder = new JsonlDecoder(8);
+  decoder.feed(Buffer.from('one\r\n\n\r\ntwo\nthr'), line => lines.push(line));
+  decoder.feed(Buffer.from('ee\n'), line => lines.push(line));
+  assert.deepEqual(lines, ['one', 'two', 'three']);
+  assert.throws(() => decoder.feed(Buffer.from('123456789'), () => {}), /byte limit/);
+  decoder.feed(Buffer.from('ok\n'), line => lines.push(line));
+  assert.deepEqual(lines.at(-1), 'ok', 'a partial oversized line is discarded, not prefixed to the next one');
+});
+
+test('only plain objects count as records', () => {
+  for (const value of [{}, { type: 'x' }, Object.create(null)]) assert.equal(isRecord(value), true);
+  for (const value of [null, undefined, [], [1], 'text', 42, true]) assert.equal(isRecord(value), false);
 });

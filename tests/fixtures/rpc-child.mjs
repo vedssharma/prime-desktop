@@ -6,6 +6,8 @@ function handle(line) {
  if (command.type === 'never') return;
  if (command.type === 'crash') { process.exit(2); }
  if (command.type === 'malformed') { process.stdout.write('null\n'); return; }
+ if (command.type === 'mismatch') { process.stdout.write(JSON.stringify({type:'response',id:command.id,command:'other',success:true})+'\n'); return; }
+ if (command.type === 'stray') process.stdout.write(JSON.stringify({type:'response',id:'unknown-id',command:'stray',success:true,data:{value:'stray'}})+'\n');
  if (command.type === 'rejected') { process.stdout.write(JSON.stringify({type:'response',id:command.id,command:command.type,success:false,error:'Rejected by fixture'})+'\n');return; }
  if (command.type === 'prompt') process.stdout.write(JSON.stringify({ type:'agent_start' })+'\n');
  const result = { type: 'response', id: command.id, command: command.type, success: true, data: command.type === 'get_state' ? { sessionId: 'fixture', isStreaming: false } : { value: command.value } };

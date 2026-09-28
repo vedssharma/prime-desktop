@@ -13,6 +13,7 @@ import ProviderSettings from './ProviderSettings';
 import { groupConversation } from './trace';
 import { useRevealedText } from './reveal';
 import { applyAppearance, loadAppearance, saveAppearance, type Appearance } from './appearance';
+import { errorText, folderName, messageTime, relativeTime } from './format';
 
 const isElectron = navigator.userAgent.includes('Electron');
 const newSessionShortcut = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘ N' : 'Ctrl N';
@@ -21,16 +22,6 @@ const starters = [
   { icon: Search, title: 'Explore a codebase', description: 'Find your way around a project', prompt: 'Explore this codebase and explain its structure, key components, and how to get started.' },
   { icon: GitBranch, title: 'Make it better', description: 'Find bugs and thoughtful improvements', prompt: 'Review this project for bugs and opportunities to improve it. Explain your findings before making changes.' },
 ];
-const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
-const folderName = (path: string) => path.replace(/[\\/]$/, '').split(/[\\/]/).pop() || path || 'Choose a folder';
-const relativeTime = (value: string) => { const mins = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000)); return mins < 1 ? 'now' : mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 1440)}d`; };
-// Today's messages show only the time; older ones include the date (and year, if not this year).
-const messageTime = (value: string) => {
-  const date = new Date(value), now = new Date();
-  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  if (date.toDateString() === now.toDateString()) return time;
-  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) })}, ${time}`;
-};
 function DockMark({ className = '' }: { className?: string }) { return <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="7" y="4" width="18" height="15" rx="3" stroke="currentColor" strokeWidth="2.5" /><path d="m11 9 3 3-3 3m7 0h3M4 20v5a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3v-5M4 21h7l2 3h6l2-3h7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
 function CodeBlock({ children }: { children?: ReactNode }) {
   const pre = useRef<HTMLPreElement>(null);

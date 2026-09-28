@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, copyFile, chmod, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, copyFile, chmod, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PrimeService } from '../electron/prime.js';
@@ -88,4 +88,50 @@ test('a failed CLI version check is retried on reconnect, without a restart', as
   await service.connect();
   assert.equal((await service.status()).canCreateOwned,true);
  }finally{await service.close();await daemon.close();await rm(dir,{recursive:true,force:true});}
+});
+
+async function ownedFixture(run:(service:PrimeService,dir:string)=>Promise<void>) {
+ const dir=await mkdtemp(join(tmpdir(),'owned-fixture-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const service=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent')});
+ try { await run(service,dir); } finally{await service.close();await rm(dir,{recursive:true,force:true});}
+}
+
+test('owned creation rejects slash or blank prompts and non-directory workspaces before launching', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const file=join(dir,'file.txt');await writeFile(file,'');
+  for(const prompt of ['   ','/new','  /resume x']) await assert.rejects(service.createSession({cwd:dir,prompt,allowFileChanges:true}),/plain-language prompt/,prompt);
+  for(const cwd of ['relative/dir',file]) await assert.rejects(service.createSession({cwd,prompt:'Hello',allowFileChanges:true}),/absolute workspace/,cwd);
+  await assert.rejects(service.createSession({cwd:dir,prompt:'Hello',allowFileChanges:'yes' as any}),/Confirm/);
+  assert.deepEqual(await service.listSessions(),[]);
+  assert.equal(await service.hasOpenOwnedSessions(),false);
+ });
+});
+
+test('model changes need provider/model before any session lookup; renames trim and cap titles', async () => {
+ await ownedFixture(async (service,dir)=>{
+  for(const model of ['model','/model','provider/']) await assert.rejects(service.setSessionModel('missing',model),/provider\/model/,model);
+  await assert.rejects(service.setSessionModel('missing','provider/model'),/Read-only compatibility/);
+  await assert.rejects(service.renameSession('missing','title'),/Read-only compatibility/);
+  const session=await service.createSession({cwd:dir,prompt:'Rename me',allowFileChanges:true});
+  await service.renameSession(session.id,'  Renamed  ');
+  assert.equal((await service.listSessions())[0].title,'Renamed');
+  await service.renameSession(session.id,' '+'y'.repeat(250));
+  assert.equal((await service.listSessions())[0].title,'y'.repeat(200));
+ });
+});
+
+test('streaming events mark an owned session running and show the partial reply until the run ends', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const session=await service.createSession({cwd:dir,prompt:'Start',allowFileChanges:true});
+  const status=async()=>(await service.listSessions())[0].status;
+  await service.getMessages(session.id);
+  assert.equal(await status(),'idle');
+  await service.sendMessage(session.id,'STREAM_PARTIAL');
+  assert.equal(await status(),'running');
+  assert.deepEqual((await service.getMessages(session.id)).map(m=>[m.role,m.content]),[['user','Start'],['user','STREAM_PARTIAL'],['assistant','partial reply']]);
+  await service.sendMessage(session.id,'FINISH_STREAM');
+  assert.equal(await status(),'idle');
+  assert.ok(!(await service.getMessages(session.id)).some(m=>m.content==='partial reply'));
+ });
 });
