@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OwnedRpcSession, type OwnedRpcTransport } from '../electron/owned-rpc.js';
@@ -141,4 +141,86 @@ test('invalid initial state or another storage directory closes the new process'
       assert.equal(rpc.closeCount, 1);
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('launch validates the executable, directories and model before starting a process', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'owned-rpc-launch-'));
+  const file = join(directory, 'file');
+  let started = 0;
+  const factory = (options: RpcLaunch) => { started++; return new FakeRpc(options.args[options.args.indexOf('--session-dir') + 1]); };
+  try {
+    await writeFile(file, '');
+    for (const [options, pattern] of [
+      [{ executable: '  ', cwd: directory, sessionDir: directory }, /executable is required/],
+      [{ executable: 'cli', cwd: 'relative', sessionDir: directory }, /must be absolute paths/],
+      [{ executable: 'cli', cwd: directory, sessionDir: 'relative' }, /must be absolute paths/],
+      [{ executable: 'cli', cwd: file, sessionDir: directory }, /Working directory must be a directory/],
+      [{ executable: 'cli', cwd: directory, sessionDir: directory, model: 'provider/model\n--extra' }, /Invalid model selector/],
+      [{ executable: 'cli', cwd: directory, sessionDir: directory, model: '   ' }, /Invalid model selector/],
+    ] as const) await assert.rejects(OwnedRpcSession.launch(options, factory), pattern, JSON.stringify(options));
+    assert.equal(started, 0);
+    let launch!: RpcLaunch;
+    const session = await OwnedRpcSession.launch({ executable: 'cli', cwd: directory, sessionDir: directory }, options => { launch = options; return factory(options); });
+    assert.deepEqual(launch.args, ['--mode', 'rpc', '--cwd', session.cwd, '--session-dir', session.cwd, '--no-extensions']);
+    await session.close();
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('messages over 512 KiB are measured in bytes and never sent', async () => {
+  await fixture(async (session, rpc) => {
+    const before = rpc.commands.length;
+    await assert.rejects(session.send('é'.repeat(256 * 1024 + 1)), /512 KiB/);
+    assert.equal(rpc.commands.length, before);
+    await session.send('é'.repeat(256 * 1024));
+    assert.equal(rpc.commands.at(-1)?.command.type, 'prompt');
+  });
+});
+
+test('invalid transcripts, model responses and unverifiable state close the session; a bad catalog does not', async () => {
+  const respond = (rpc: FakeRpc, type: string, value: any) => {
+    const original = rpc.request.bind(rpc);
+    rpc.request = async (command, mutation) => {
+      if (command.type !== type) return original(command, mutation);
+      rpc.commands.push({ command, mutation: mutation ?? true });
+      return value;
+    };
+  };
+  await fixture(async (session, rpc) => {
+    respond(rpc, 'get_available_models', { models: [{ id: 'no-provider' }] });
+    await assert.rejects(session.availableModels(), /Invalid owned RPC model catalog/);
+    assert.equal(session.alive, true);
+    await assert.rejects(session.setModel(' ', 'model'), /required/);
+    respond(rpc, 'set_model', { id: 5, provider: 'provider' });
+    await assert.rejects(session.setModel('provider', 'model'), /Invalid model-change response/);
+    assert.equal(session.alive, false);
+    await assert.rejects(session.send('after'), /Invalid model-change response/);
+  });
+  await fixture(async (session, rpc) => {
+    respond(rpc, 'get_messages', { messages: [1] });
+    await assert.rejects(session.refresh(), /Invalid owned session transcript/);
+    assert.equal(session.alive, false);
+  });
+  await fixture(async (session, rpc) => {
+    rpc.request = async () => { throw Error('pipe read failed'); };
+    await assert.rejects(session.getState(), /pipe read failed/);
+    assert.equal(session.alive, false);
+    await assert.rejects(session.abort(), /Could not verify the owned session identity/);
+  });
+});
+
+test('event listeners can unsubscribe and closing detaches from the pipe', async () => {
+  await fixture(async (session, rpc) => {
+    const seen: string[] = [];
+    const unsubscribe = session.onEvent(event => seen.push(event.type));
+    const emit = (type: string) => { for (const listener of rpc.listeners) listener({ type }); };
+    emit('agent_start');
+    unsubscribe();
+    emit('agent_end');
+    session.onEvent(event => seen.push(`late:${event.type}`));
+    await session.close();
+    emit('message_update');
+    assert.deepEqual(seen, ['agent_start']);
+    assert.equal(rpc.listeners.size, 0);
+    assert.equal(session.alive, false);
+  });
 });
