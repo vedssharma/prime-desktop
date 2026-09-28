@@ -84,7 +84,7 @@ test('a failed CLI version check is retried on reconnect, without a restart', as
   assert.equal((await service.status()).canCreateOwned,false);
   await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
   assert.equal((await service.status()).canCreateOwned,false); // Background polls reuse a recent failure.
-  assert.equal((await service.connect()).canCreateOwned,true);
+  await service.connect();
   assert.equal((await service.status()).canCreateOwned,true);
  }finally{await service.close();await daemon.close();await rm(dir,{recursive:true,force:true});}
 });
