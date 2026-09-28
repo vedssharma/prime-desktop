@@ -11,6 +11,7 @@
     "build": "npm run notices && tsc --noEmit && vite build && tsc -p tsconfig.electron.json",
     "start": "electron .",
     "test": "tsx --test tests/*.test.ts",
+    "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-exclude=\"node_modules/**\" tests/*.test.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.tests.json",
     "package": "npm run check && npm run build && electron-builder --dir",
     "dist": "npm run check && npm run build && electron-builder",
