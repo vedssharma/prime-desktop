@@ -14,3 +14,13 @@ test('signed releases require credentials and override disabled discovery', () =
   assert.equal(policy.env.CSC_IDENTITY_AUTO_DISCOVERY, 'true'); assert(policy.args.includes('--config.forceCodeSigning=true'));
   assert.throws(() => releasePolicy(false, 'win32', {}), /unsupported/);
 });
+test('Linux releases are unsigned only and strip every signing and notarization variable', () => {
+  const policy = releasePolicy(false, 'linux', { PATH: '/bin', CSC_LINK: 'secret', WIN_CSC_KEY_PASSWORD: 'secret', APPLE_TEAM_ID: 'team', NOTARIZE_TOOL: 'x', MY_CSC_LINK: 'kept' });
+  assert.deepEqual(policy.env, { PATH: '/bin', MY_CSC_LINK: 'kept', CSC_IDENTITY_AUTO_DISCOVERY: 'false' });
+  assert.deepEqual(policy.args, ['--config.forceCodeSigning=false']);
+  assert.throws(() => releasePolicy(true, 'linux', { CSC_LINK: 'c', CSC_KEY_PASSWORD: 'p', APPLE_ID: 'i', APPLE_APP_SPECIFIC_PASSWORD: 'p', APPLE_TEAM_ID: 't' }), /macOS only/);
+  for (const key of ['CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID']) {
+    const env = { CSC_LINK: 'c', CSC_KEY_PASSWORD: 'p', APPLE_ID: 'i', APPLE_APP_SPECIFIC_PASSWORD: 'p', APPLE_TEAM_ID: 't', [key]: '' };
+    assert.throws(() => releasePolicy(true, 'darwin', env), new RegExp(`requires ${key}`));
+  }
+});
