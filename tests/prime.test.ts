@@ -138,3 +138,59 @@ test('linear v1 transcripts keep every entry and cyclic parent links terminate',
   assert.deepEqual(cyclic.map(message => message.content), ['One', 'Two']);
   assert.deepEqual(parseSavedTranscript('\n  \n'), []);
 });
+
+test('saved transcripts reject missing files, broken headers and multiple headers; unchanged files are cached', async () => {
+  const daemon = await fakeDaemon(() => ({ sessions: ['cached', 'broken', 'twice', 'nofile'].map(id => ({ sessionId: id, ...(id === 'nofile' ? {} : { sessionFile: join(daemon.directory, `${id}.jsonl`) }) })) }));
+  const service = new PrimeService({ socketPath: daemon.socketPath });
+  const file = (id: string) => join(daemon.directory, `${id}.jsonl`);
+  const message = (id: string, content: string) => JSON.stringify({ type: 'message', id, parentId: null, message: { role: 'user', content } });
+  try {
+    await writeFile(file('broken'), '{not json\n' + message('a', 'x') + '\n');
+    await assert.rejects(service.getMessages('broken'), /Invalid saved session header/);
+    await writeFile(file('twice'), JSON.stringify({ type: 'session', id: 'twice' }) + '\n' + message('a', 'x') + '\n' + JSON.stringify({ type: 'session', id: 'other' }) + '\n');
+    await assert.rejects(service.getMessages('twice'), /Multiple session headers/);
+    await assert.rejects(service.getMessages('nofile'), /no saved transcript/);
+    await assert.rejects(service.getMessages('unknown'), /Session not found/);
+    await writeFile(file('cached'), JSON.stringify({ type: 'session', id: 'cached' }) + '\n' + message('a', 'First') + '\n');
+    const first = await service.getMessages('cached');
+    assert.equal(await service.getMessages('cached'), first, 'an unchanged file returns the cached result');
+    await writeFile(file('cached'), JSON.stringify({ type: 'session', id: 'cached' }) + '\n' + message('a', 'Changed text') + '\n');
+    assert.equal((await service.getMessages('cached'))[0].content, 'Changed text');
+  } finally { service.close(); await daemon.close(); }
+});
+
+test('shared list hides child runtimes, sorts newest first, and rejects malformed catalogs', async () => {
+  let sessions: unknown = [
+    { sessionId: 'older', lastActivityAt: '2024-01-01T00:00:00Z' },
+    { sessionId: 'subagent', runtimeKind: 'subagent' }, { sessionId: 'rlm', rlmDepth: 1 }, { sessionId: 'child', parentSessionId: 'older' },
+    { cwd: '/no/id' }, { sessionId: 'newer', lastActivityAt: '2024-03-01T00:00:00Z' },
+  ];
+  const daemon = await fakeDaemon(() => ({ sessions }));
+  const service = new PrimeService({ socketPath: daemon.socketPath });
+  try {
+    const listed = await service.listSessions();
+    assert.deepEqual(listed.map(s => [s.id, s.ownership, s.writable]), [['newer', 'shared', false], ['older', 'shared', false]]);
+    for (const malformed of ['not a list', [1], [null], undefined]) {
+      sessions = malformed;
+      await assert.rejects(service.listSessions(), /Invalid daemon session list/, JSON.stringify(malformed));
+    }
+  } finally { service.close(); await daemon.close(); }
+  const offline = new PrimeService({ socketPath: join(daemon.directory, 'absent.sock') });
+  try { await assert.rejects(offline.listSessions(), /ENOENT/); } finally { offline.close(); }
+});
+
+test('status reports the daemon version or an honest disconnected state', async () => {
+  const daemon = await fakeDaemon(undefined, { appVersion: '2.0.0', version: '0.9.5' });
+  const connected = new PrimeService({ socketPath: daemon.socketPath, home: '/fixture/home' });
+  const offline = new PrimeService({ socketPath: join(daemon.directory, 'absent.sock'), home: '/fixture/home' });
+  try {
+    const status = await connected.status();
+    assert.equal(status.connected, true); assert.equal(status.version, '2.0.0'); assert.equal(status.home, '/fixture/home');
+    assert.equal(status.readOnly, true); assert.equal(status.canCreateOwned, false); assert.match(status.ownedReason ?? '', /not enabled/);
+    const down = await offline.status();
+    assert.equal(down.connected, false); assert.match(down.error ?? '', /ENOENT/); assert.equal(down.home, '/fixture/home'); assert.equal(down.readOnly, true);
+  } finally { connected.close(); offline.close(); await daemon.close(); }
+  const plain = await fakeDaemon();
+  const service = new PrimeService({ socketPath: plain.socketPath });
+  try { assert.equal((await service.status()).version, '0.9.5'); } finally { service.close(); await plain.close(); }
+});
