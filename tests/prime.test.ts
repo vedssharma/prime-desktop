@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { PrimeService, normalizeMessages, parseSavedTranscript } from '../electron/prime.js';
+import { PrimeService, normalizeMessages, normalizeSession, parseSavedTranscript } from '../electron/prime.js';
 import { fakeDaemon } from './fake-daemon.js';
 
 test('legacy daemon blocks every mutation before dispatch', async () => {
@@ -78,4 +78,63 @@ test('saved history preserves visible custom messages and summaries with active 
   assert.deepEqual(saved, live);
   assert.equal(saved.length, 3);
   assert.match(saved[2].content, /Context summary/);
+});
+
+test('daemon sessions map status, title, model and dates with safe fallbacks', () => {
+  const epoch = new Date(0).toISOString();
+  assert.deepEqual(normalizeSession({}), { id: '', title: 'Untitled session', cwd: '', model: '', status: 'idle', updatedAt: epoch, createdAt: epoch });
+  assert.equal(normalizeSession({ sessionId: 'persistent', id: 'runtime' }).id, 'persistent');
+  assert.equal(normalizeSession({ id: 'runtime' }).id, 'runtime');
+  assert.equal(normalizeSession({ sessionName: 'Named', name: 'n', firstMessage: 'f' }).title, 'Named');
+  assert.equal(normalizeSession({ sessionName: 5, name: 'Fallback name', firstMessage: 'f' }).title, 'Fallback name');
+  assert.equal(normalizeSession({ firstMessage: 'First prompt' }).title, 'First prompt');
+  assert.equal(normalizeSession({ model: { name: 'Display', id: 'raw' } }).model, 'Display');
+  assert.equal(normalizeSession({ model: { id: 'raw' } }).model, 'raw');
+  for (const raw of [{ workerState: 'failed', isStreaming: true }, { rosterStatus: 'error', activity: 'working' }]) assert.equal(normalizeSession(raw).status, 'error');
+  for (const flag of ['isStreaming', 'isCompacting', 'isBashRunning', 'hasRunningRlmChildren']) assert.equal(normalizeSession({ [flag]: true }).status, 'running', flag);
+  assert.equal(normalizeSession({ activity: 'working' }).status, 'running');
+  assert.equal(normalizeSession({ activity: 'idle', workerState: 'ready' }).status, 'idle');
+  const created = '2024-01-02T03:04:05.000Z', modified = '2024-02-03T04:05:06.000Z', active = 1_710_000_000_000;
+  assert.deepEqual(normalizeSession({ created, modified, lastActivityAt: active }), { ...normalizeSession({}), createdAt: created, updatedAt: new Date(active).toISOString() });
+  assert.equal(normalizeSession({ created, modified, lastActivityAt: 'not a date' }).updatedAt, modified);
+  assert.equal(normalizeSession({ created, modified: {} }).updatedAt, created);
+  assert.equal(normalizeSession({ created: 'garbage' }).createdAt, epoch);
+});
+
+test('message mapping formats shell runs, images, plain strings and generated ids', () => {
+  const messages = normalizeMessages([
+    { role: 'user', timestamp: '2024-01-02T03:04:05Z', content: 'Plain string' },
+    { role: 'bashExecution', command: 'ls -a', output: '.\n..' },
+    { id: 'img', role: 'user', content: [{ type: 'text', text: 'Look' }, { type: 'image', data: 'base64' }] },
+    { id: 'call', role: 'assistant', content: [{ type: 'toolCall', name: 'read' }] },
+    { id: 'empty', role: 'assistant', content: [{ type: 'thinking', thinking: 'hidden' }] },
+    { id: 'notice', role: 'custom', display: true, content: 'Visible custom' },
+    { id: 'err', role: 'toolResult', errorMessage: 'Denied', content: 'partial', toolName: 'write' },
+  ]);
+  assert.deepEqual(messages, [
+    { id: 'user-2024-01-02T03:04:05Z-0', role: 'user', content: 'Plain string', timestamp: '2024-01-02T03:04:05.000Z' },
+    { id: 'bashExecution-1-1', role: 'tool', content: '$ ls -a\n.\n..', timestamp: undefined },
+    { id: 'img', role: 'user', content: 'Look\n[Image attachment]', timestamp: undefined },
+    { id: 'call-call-0', role: 'tool', toolName: 'read', timestamp: undefined, content: '{}' },
+    { id: 'notice', role: 'system', content: 'Visible custom', timestamp: undefined },
+    { id: 'err', role: 'tool', content: 'partial\n\nError: Denied', timestamp: undefined, toolName: 'write' },
+  ]);
+});
+
+test('linear v1 transcripts keep every entry and cyclic parent links terminate', () => {
+  const lines = (records: object[]) => records.map(record => JSON.stringify(record)).join('\n');
+  const linear = parseSavedTranscript(lines([
+    { type: 'session', id: 'header' },
+    { type: 'message', id: 'a', message: { role: 'user', content: 'One' } },
+    { type: 'model_change', id: 'm' },
+    { type: 'message', id: 'b', message: { role: 'assistant', content: 'Two' } },
+  ]));
+  assert.deepEqual(linear.map(message => [message.id, message.content]), [['a', 'One'], ['b', 'Two']]);
+  const cyclic = parseSavedTranscript(lines([
+    { type: 'session', id: 'header' },
+    { type: 'message', id: 'a', parentId: 'b', message: { role: 'user', content: 'One' } },
+    { type: 'message', id: 'b', parentId: 'a', message: { role: 'assistant', content: 'Two' } },
+  ]));
+  assert.deepEqual(cyclic.map(message => message.content), ['One', 'Two']);
+  assert.deepEqual(parseSavedTranscript('\n  \n'), []);
 });
