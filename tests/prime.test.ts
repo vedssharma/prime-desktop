@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, mkdtemp, mkdir, chmod, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PrimeService, normalizeMessages, normalizeSession, parseSavedTranscript } from '../electron/prime.js';
 import { fakeDaemon } from './fake-daemon.js';
@@ -193,4 +194,31 @@ test('status reports the daemon version or an honest disconnected state', async 
   const plain = await fakeDaemon();
   const service = new PrimeService({ socketPath: plain.socketPath });
   try { assert.equal((await service.status()).version, '0.9.5'); } finally { service.close(); await plain.close(); }
+});
+
+test('CLI discovery prefers the configured executable, then PRIME_AGENT_BIN, then ~/.local/bin, and gates on 0.9.6', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cli-discovery-'));
+  const home = join(dir, 'home'); const previous = process.env.PRIME_AGENT_BIN;
+  const cli = async (path: string, version: string) => { await writeFile(path, `#!${process.execPath}\nconsole.log(${JSON.stringify(version)});\n`); await chmod(path, 0o700); return path; };
+  const support = async (options: ConstructorParameters<typeof PrimeService>[0]) => {
+    const service = new PrimeService({ desktopDir: join(dir, 'desktop'), socketPath: join(dir, 'absent.sock'), home, ...options });
+    try { const status = await service.status(); return [status.canCreateOwned, status.ownedReason ?? ''] as const; } finally { service.close(); }
+  };
+  try {
+    delete process.env.PRIME_AGENT_BIN;
+    await mkdir(join(home, '.local/bin'), { recursive: true });
+    await cli(join(home, '.local/bin/prime-agent'), 'prime-agent 0.9.6');
+    assert.deepEqual(await support({}), [true, '']);
+    process.env.PRIME_AGENT_BIN = await cli(join(dir, 'env-cli'), '0.9.5');
+    const [allowed, reason] = await support({});
+    assert.equal(allowed, false); assert.match(reason, /require verified Prime Agent 0\.9\.6/);
+    assert.deepEqual(await support({ executable: await cli(join(dir, 'configured'), '0.9.6') }), [true, '']);
+    for (const version of ['0.9.60', '10.9.6']) assert.equal((await support({ executable: await cli(join(dir, `v-${version}`), version) }))[0], false, version);
+    assert.match((await support({ executable: join(dir, 'missing') }))[1], /Install Prime Agent 0\.9\.6/);
+    const [readOnlyAllowed, readOnlyReason] = await support({ executable: join(dir, 'configured'), readOnly: true });
+    assert.equal(readOnlyAllowed, false); assert.match(readOnlyReason, /not enabled/);
+  } finally {
+    if (previous === undefined) delete process.env.PRIME_AGENT_BIN; else process.env.PRIME_AGENT_BIN = previous;
+    await rm(dir, { recursive: true, force: true });
+  }
 });
