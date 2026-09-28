@@ -1,5 +1,7 @@
 # Session Dock
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/vedssharma/prime-desktop)
+
 An unofficial, community-built desktop companion for [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent). Built with Electron, React, and TypeScript.
 
 **Not affiliated with or endorsed by Prime Intellect.** Session Dock has its own name and icon; Prime Agent remains a separately installed dependency. The repository URL retains `prime-desktop` for continuity.
@@ -92,6 +94,14 @@ This is an initial desktop companion, not complete CLI feature parity. Login, pr
 Local development and unsigned packaging are supported. Signed/notarized public distribution needs platform signing credentials and release setup. The integration targets Prime Agent 0.9.5 with daemon protocol 7 / schema 28 or newer. Other protocol versions fail with an explicit compatibility error; future protocol changes may need an adapter update.
 
 For nonstandard installations, set `PRIME_AGENT_BIN` to the CLI executable and `PRIME_DESKTOP_SOCKET` to the public daemon socket path. The default socket discovery currently targets macOS and Linux. Windows is unsupported and no Windows installer is offered. Saved transcripts larger than 64 MiB must be opened in the CLI.
+
+## Documentation
+
+Generated codebase documentation is available on
+[DeepWiki](https://deepwiki.com/vedssharma/prime-desktop), where you can also ask
+questions about the code. It is produced automatically from this repository and may
+lag behind recent changes; the design notes in [docs/](docs/) and this README take
+precedence.
 
 ## Contributing
 
