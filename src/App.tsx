@@ -313,7 +313,7 @@ export default function App() {
       }
       await refresh();
       if (dialogRef.current === operation) setDialog(null);
-    } catch (err) { setError(`${operation === 'delete' ? 'Delete' : 'Rename'} session: ${errorText(err)}`); }
+    } catch (err) { setError(`${operation === 'delete' ? 'Delete' : operation === 'close-owned' ? 'Close' : 'Rename'} session: ${errorText(err)}`); }
     finally { dialogPendingRef.current = false; setDialogPending(false); }
   }
 
