@@ -199,7 +199,8 @@ export default function App() {
   }, [running]);
 
   useEffect(() => {
-    setMessages([]); setVisibleMessages(100); followBottom.current = true; knownIds.current = null;
+    // Errors belong to the view that caused them; do not carry them into another session.
+    setMessages([]); setVisibleMessages(100); setError(''); followBottom.current = true; knownIds.current = null;
     if (!activeId) { setLoadingMessages(false); return; }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;

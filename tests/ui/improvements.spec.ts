@@ -55,3 +55,15 @@ test('a failed close reports a close error, not a rename error', async ({ page }
   await page.getByRole('button', { name: 'Close and stop' }).click();
   await expect(page.locator('.error-banner')).toContainText('Close session: Owned process did not exit');
 });
+
+test('an error from one session is cleared when switching to another', async ({ page }) => {
+  await open(page);
+  await select(page, 'Owned session');
+  await page.getByRole('button', { name: 'Session actions' }).click();
+  await page.getByRole('button', { name: 'Close desktop session' }).click();
+  await page.getByRole('button', { name: 'Close and stop' }).click();
+  await expect(page.locator('.error-banner')).toBeVisible();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await select(page, 'Shared session');
+  await expect(page.locator('.error-banner')).toHaveCount(0);
+});
