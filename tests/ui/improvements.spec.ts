@@ -92,3 +92,19 @@ test('code blocks copy exactly their displayed code through the native bridge', 
   await block.getByRole('button', { name: 'Copy code' }).click();
   await expect(block.getByRole('alert')).toHaveText('Copy failed: Clipboard unavailable');
 });
+
+test('opening a session lands on the latest output; scrolling away offers Jump to latest', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__messages.owned.push(...Array.from({ length: 40 }, (_, i) => ({ id: `long-${i}`, role: 'assistant', content: `Paragraph ${i}\n\nSome longer response text for scrolling.` }))); });
+  await open(page);
+  // The trust checkbox makes the welcome page scrollable; its scroll position must not leak into the session.
+  await page.locator('.content-scroll').evaluate(node => { node.scrollTop = node.scrollHeight; });
+  await select(page, 'Owned session');
+  await expect(page.getByText('Paragraph 39')).toBeInViewport();
+  const jump = page.getByRole('button', { name: 'Jump to latest' });
+  await expect(jump).toHaveCount(0);
+  await page.locator('.content-scroll').evaluate(node => { node.scrollTop = 0; });
+  await expect(jump).toBeVisible();
+  await jump.click();
+  await expect(jump).toHaveCount(0);
+  await expect(page.getByText('Paragraph 39')).toBeInViewport();
+});

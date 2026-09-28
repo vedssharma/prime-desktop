@@ -143,6 +143,10 @@ button svg{flex-shrink:0}
 .context-separator{height:12px;width:1px;background:var(--border)}
 .header-running{font-size:9px;color:var(--accent-text);display:flex;align-items:center;gap:7px}
 .content-scroll{flex:1;overflow:auto;min-height:0;scroll-behavior:auto}
+/* Zero-height sticky anchor: the button floats over the transcript without changing its scroll height. */
+.jump-latest-anchor{position:sticky;bottom:14px;height:0;display:flex;justify-content:center;pointer-events:none}
+.jump-latest{pointer-events:auto;transform:translateY(-100%);display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text);font-size:11px;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.12);cursor:pointer}
+.jump-latest:hover{border-color:var(--accent-border)}
 .welcome-scroll{display:flex;flex-direction:column}
 .welcome{width:min(100% - 80px,780px);margin:auto;padding:45px 0 31px}
 .welcome-eyebrow{display:flex;align-items:center;justify-content:center;gap:9px;font-size:8px;letter-spacing:2px;font-weight:550;color:var(--muted);margin-bottom:27px}
