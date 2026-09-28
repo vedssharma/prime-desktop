@@ -275,7 +275,7 @@ export class PrimeService {
     if (this.closing) throw Error('Desktop sessions are closing.');
     const rpc = await OwnedRpcSession.launch({ executable: await this.cli(), cwd: input.cwd, sessionDir: this.store!.transcripts, model: input.model, socketPath: this.transport.socketPath });
     const now = new Date().toISOString();
-    const metadata: OwnedMetadata = { id: `desktop-${randomUUID()}`, sessionId: rpc.id, sessionFile: rpc.sessionFile, cwd: input.cwd, title: input.prompt.trim().slice(0, 100), model: input.model ?? '', createdAt: now, updatedAt: now };
+    const metadata: OwnedMetadata = { id: `desktop-${randomUUID()}`, sessionId: rpc.id, sessionFile: rpc.sessionFile, cwd: input.cwd, title: input.prompt.replace(/\s+/g, ' ').trim().slice(0, 100), model: input.model ?? '', createdAt: now, updatedAt: now };
     const entry = { metadata, rpc, state: {} as WireRecord, error: undefined as string | undefined, streaming: undefined as WireRecord | undefined };
     try {
       if (this.closing) throw Error('Desktop closed before the session started.');

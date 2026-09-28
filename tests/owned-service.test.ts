@@ -64,7 +64,8 @@ test('accepted follow-ups persist owned-session activity across a relaunch', asy
  const options={executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent')};
  const service=new PrimeService(options);
  try {
-  const session=await service.createSession({cwd:dir,prompt:'First',allowFileChanges:true});
+  const session=await service.createSession({cwd:dir,prompt:'  First line\n\n  second\tline ',allowFileChanges:true});
+  assert.equal(session.title,'First line second line');
   await new Promise(resolve=>setTimeout(resolve,20));
   await service.sendMessage(session.id,'Later follow-up');
   const live=(await service.listSessions()).find(s=>s.id===session.id)!;
