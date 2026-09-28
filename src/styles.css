@@ -232,6 +232,10 @@ h1>span:after{content:'';position:absolute;bottom:-3px;height:4px;left:0;right:0
 .markdown pre{background:var(--code);color:var(--code-text);padding:17px;border:1px solid var(--code-border);border-radius:8px;overflow:auto;font-size:11px;line-height:1.7;margin:14px 0}
 .markdown code{font-family:'SFMono-Regular',Consolas,monospace;font-size:11px;background:var(--surface-subtle);color:var(--accent-text);padding:2px 5px;border-radius:4px}
 .markdown pre code{padding:0;background:none;color:inherit;font-size:11px}
+.code-block{position:relative}
+.copy-code{position:absolute;top:7px;right:7px;color:var(--code-text);background:var(--code);opacity:0;transition:opacity .15s}
+.code-block:hover .copy-code,.copy-code:focus-visible,.copy-code[aria-label='Code copied']{opacity:1}
+@media(hover:none){.copy-code{opacity:1}}
 .markdown ul,.markdown ol{padding-left:21px}
 .markdown li{padding-left:3px;margin:4px 0}
 .markdown blockquote{border-left:3px solid var(--accent-border);padding:2px 15px;margin:16px 0;color:var(--muted);background:var(--surface-subtle)}

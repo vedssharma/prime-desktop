@@ -77,3 +77,18 @@ for (const [platform, shortcut] of [['MacIntel', '⌘ N'], ['Linux x86_64', 'Ctr
     await expect(page.locator('.about-shortcut kbd').first()).toHaveText(shortcut);
   });
 }
+
+test('code blocks copy exactly their displayed code through the native bridge', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__messages.owned.push({ id: 'a1', role: 'assistant', content: 'Run this:\n\n```sh\nnpm ci\nnpm run dev\n```\n\nThen reload.' }); });
+  await open(page);
+  await select(page, 'Owned session');
+  const block = page.locator('.code-block');
+  await block.hover();
+  await block.getByRole('button', { name: 'Copy code' }).click();
+  await expect(block.getByRole('button', { name: 'Code copied' })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__calls)).toContainEqual(['copy', 'npm ci\nnpm run dev']);
+  await page.evaluate(() => { (window as any).prime.copyText = async () => { throw Error('Clipboard unavailable'); }; });
+  await expect(block.getByRole('button', { name: 'Copy code' })).toBeVisible();
+  await block.getByRole('button', { name: 'Copy code' }).click();
+  await expect(block.getByRole('alert')).toHaveText('Copy failed: Clipboard unavailable');
+});

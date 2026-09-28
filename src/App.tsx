@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, CircleHelp, Code2, Copy, Folder, FolderOpen, GitBranch, LoaderCircle, Menu, MessageSquare, MoreHorizontal, PanelLeftClose, Plus, RefreshCw, Search, Sparkles, Square, Settings, Terminal, Trash2, X, Pencil, Zap } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -25,10 +25,19 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
 const folderName = (path: string) => path.replace(/[\\/]$/, '').split(/[\\/]/).pop() || path || 'Choose a folder';
 const relativeTime = (value: string) => { const mins = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000)); return mins < 1 ? 'now' : mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 1440)}d`; };
 function DockMark({ className = '' }: { className?: string }) { return <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="7" y="4" width="18" height="15" rx="3" stroke="currentColor" strokeWidth="2.5" /><path d="m11 9 3 3-3 3m7 0h3M4 20v5a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3v-5M4 21h7l2 3h6l2-3h7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>; }
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const pre = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
+  // Copy the rendered text so it matches exactly what is displayed, without Markdown fences.
+  const copy = () => { setCopyError(''); void window.prime.copyText((pre.current?.textContent ?? '').replace(/\n$/, '')).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(error => setCopyError(`Copy failed: ${errorText(error)}`)); };
+  return <div className="code-block"><pre ref={pre}>{children}</pre><button type="button" className="copy-code icon-button" aria-label={copied ? 'Code copied' : 'Copy code'} title="Copy code" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>{copyError && <p role="alert">{copyError}</p>}</div>;
+}
 // Untrusted Markdown: links open externally and images are never loaded inline.
 const markdownComponents: Components = {
   a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
   img: ({ alt, src }) => <a href={src} target="_blank" rel="noreferrer">[Image: {alt || 'View image'}]</a>,
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
 };
 function ToolCall({ step }: { step: Message }) { return <details className="tool-message"><summary><Terminal size={14} /><span>{step.toolName || 'Tool call'}</span><ChevronRight size={14} /></summary><pre>{step.content || 'No output'}</pre></details>; }
 const MessageView = memo(function MessageView({ message, animate = false }: { message: Message; animate?: boolean }) {
