@@ -108,3 +108,16 @@ test('opening a session lands on the latest output; scrolling away offers Jump t
   await expect(jump).toHaveCount(0);
   await expect(page.getByText('Paragraph 39')).toBeInViewport();
 });
+
+test('message times include the date for messages from earlier days', async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__messages.owned.push(
+    { id: 'old', role: 'user', content: 'Older question', timestamp: '2024-03-05T12:00:00.000Z' },
+    { id: 'new', role: 'assistant', content: 'Fresh answer', timestamp: new Date().toISOString() },
+  ); });
+  await open(page);
+  await select(page, 'Owned session');
+  const old = page.locator('.message', { hasText: 'Older question' }).locator('time');
+  await expect(old).toContainText('Mar 5, 2024');
+  await expect(old).toHaveAttribute('datetime', '2024-03-05T12:00:00.000Z');
+  await expect(page.locator('.message', { hasText: 'Fresh answer' }).locator('time')).toHaveText(/^\d{1,2}:\d{2}/);
+});
