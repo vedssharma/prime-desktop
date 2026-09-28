@@ -67,3 +67,13 @@ test('an error from one session is cleared when switching to another', async ({ 
   await select(page, 'Shared session');
   await expect(page.locator('.error-banner')).toHaveCount(0);
 });
+
+for (const [platform, shortcut] of [['MacIntel', '⌘ N'], ['Linux x86_64', 'Ctrl N']] as const) {
+  test(`shortcut hints match the platform: ${platform}`, async ({ page }) => {
+    await page.addInitScript(value => Object.defineProperty(navigator, 'platform', { get: () => value }), platform);
+    await open(page);
+    await expect(page.locator('.new-session-button kbd')).toHaveText(shortcut);
+    await page.getByRole('button', { name: 'About Session Dock', exact: true }).click();
+    await expect(page.locator('.about-shortcut kbd').first()).toHaveText(shortcut);
+  });
+}
