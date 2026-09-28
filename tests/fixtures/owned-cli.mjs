@@ -10,6 +10,7 @@ mkdirSync(dir, { recursive: true });
 const file = join(dir, id + '.jsonl');
 writeFileSync(file, JSON.stringify({ type: 'session', id, cwd }) + '\n');
 const messages = []; let failState = false; let model = { provider:'fixture', id:'fixture-model', name:'Fixture model' };
+function event(value) { process.stdout.write(JSON.stringify(value)+'\n'); }
 function reply(command, success, data, error) { process.stdout.write(JSON.stringify({ type:'response',command:command.type,id:command.id,success,data,error })+'\n'); }
 let buffer='';process.stdin.setEncoding('utf8');
 process.stdin.on('data',chunk=>{buffer+=chunk;let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);handle(JSON.parse(line));}});
@@ -23,6 +24,9 @@ function handle(command) {
   appendFileSync(file,JSON.stringify({type:'message',id:randomUUID(),parentId:null,message:msg})+'\n');
   // This explicit fixture instruction is not a model call or arbitrary code execution.
   if(command.message==='WRITE_FIXTURE_FILE') writeFileSync(join(cwd,'owned-proof.txt'),'written by isolated RPC fixture\n');
+  // Streaming markers emit agent events the way a real run would, without a model call.
+  if(command.message==='STREAM_PARTIAL'){event({type:'agent_start'});event({type:'message_update',message:{role:'assistant',content:'partial reply',timestamp:1}});}
+  if(command.message==='FINISH_STREAM'){event({type:'message_end'});event({type:'agent_end'});}
   return reply(command,true);
  }
  if(command.type==='set_model'){model={provider:command.provider,id:command.modelId};return reply(command,true,model);}
