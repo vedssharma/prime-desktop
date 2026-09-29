@@ -9,6 +9,8 @@ export interface Session {
   ownership?: 'shared' | 'desktop';
   writable?: boolean;
   lifecycle?: 'open' | 'closed';
+  /** Follow-ups the agent reports as queued. Only present when the agent reports it (desktop-owned sessions). */
+  queuedCount?: number;
 }
 export interface Message {
   id: string;
@@ -30,6 +32,13 @@ export interface ConnectionStatus {
 }
 export interface CreateSessionInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; }
 export interface ConnectionConfig { executable: string; socketPath: string; }
+export interface WorkspaceEntry { name: string; type: 'file' | 'dir' | 'link'; size: number }
+export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; truncated: boolean }
+export interface WorkspaceFile { path: string; size: number; binary: boolean; truncated: boolean; content: string; hash?: string; editable: boolean }
+export interface WorkspaceSaveResult { file: WorkspaceFile; backup: string }
+export interface WorkspaceChange { path: string; status: string; label: string }
+export interface WorkspaceChanges { isRepo: boolean; changes: WorkspaceChange[]; truncated: boolean; error?: string }
+export interface WorkspaceDiff { path: string; diff: string; truncated: boolean }
 export interface PrimeAPI {
   getConnectionConfig(): Promise<ConnectionConfig>;
   configureConnection(config: ConnectionConfig): Promise<void>;
@@ -48,5 +57,13 @@ export interface PrimeAPI {
   copyText(text: string): Promise<void>;
   chooseDirectory(): Promise<string | null>;
   openDirectory(path: string): Promise<void>;
+  workspaceList(id: string, path?: string): Promise<WorkspaceListing>;
+  workspaceRead(id: string, path: string): Promise<WorkspaceFile>;
+  workspaceSave(id: string, path: string, content: string, hash: string): Promise<WorkspaceSaveResult>;
+  workspaceChanges(id: string): Promise<WorkspaceChanges>;
+  workspaceDiff(id: string, path: string): Promise<WorkspaceDiff>;
+  notify(title: string, body: string, sessionId?: string): Promise<void>;
+  onNotificationClick(listener: (sessionId: string) => void): () => void;
+  saveText(suggestedName: string, content: string): Promise<boolean>;
 }
 declare global { interface Window { prime: PrimeAPI; } }

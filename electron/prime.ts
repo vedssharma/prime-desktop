@@ -11,7 +11,7 @@ import { DaemonTransport, type WireRecord } from './transport.js';
 import { readBoundedFile, isRecord } from './bounded-io.js';
 
 const exec = promisify(execFile);
-interface Session { id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
+interface Session { queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
 interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; }
 interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; }
 export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; }
@@ -137,6 +137,7 @@ export class PrimeService {
   private ownedSession(entry: { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string }): Session {
     return { ...entry.metadata, model: entry.state?.model ? [entry.state.model.provider, entry.state.model.id].filter(Boolean).join('/') : entry.metadata.model,
       status: entry.error ? 'error' : entry.state?.isStreaming || entry.state?.isCompacting || entry.state?.unfinishedActionCount > 0 ? 'running' : 'idle',
+      ...(Number.isSafeInteger(entry.state?.sessionActions?.queuedCount) && entry.state!.sessionActions.queuedCount >= 0 ? { queuedCount: entry.state!.sessionActions.queuedCount } : {}),
       ownership: 'desktop', writable: !!entry.rpc?.alive && !this.closing, lifecycle: entry.rpc?.alive ? 'open' : 'closed' };
   }
   private async liveOwned(id: string) {

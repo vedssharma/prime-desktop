@@ -1,9 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, clipboard } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, clipboard, Notification } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { validateConfig, text, directory } from './ipc-validation.js';
 import { PrimeService } from './prime.js';
+import { listWorkspace, readWorkspaceFile, saveWorkspaceFile, workspaceChanges, workspaceDiff } from './workspace.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const devURL = !app.isPackaged ? process.env.PRIME_DESKTOP_DEV_URL : undefined;
@@ -62,6 +63,48 @@ function registerIPC() {
     if (!window) return null;
     const result = await dialog.showOpenDialog(window, { title: 'Choose a workspace', properties: ['openDirectory', 'createDirectory'] });
     return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  // The renderer names a session, never a directory: the root always comes from the session record.
+  const findSession = async (id: unknown) => {
+    const sessionId = text(id, 'session ID', 4096);
+    const session = (await service.listSessions()).find(item => item.id === sessionId);
+    if (!session) throw new Error('Session not found.');
+    return session;
+  };
+  const sessionRoot = async (id: unknown) => directory((await findSession(id)).cwd);
+  const relativePath = (value: unknown) => value === undefined || value === '' ? '' : text(value, 'path', 4096);
+  handle('workspaceList', async (id, relative) => listWorkspace(await sessionRoot(id), relativePath(relative)));
+  handle('workspaceRead', async (id, relative) => readWorkspaceFile(await sessionRoot(id), text(relative, 'path', 4096)));
+  handle('workspaceSave', async (id, relative, content, hash) => {
+    // Editing needs the explicit workspace trust given when a desktop-owned session was created;
+    // shared CLI sessions keep a read-only view.
+    const session = await findSession(id);
+    if (session.ownership !== 'desktop') throw new Error('Files can be edited only in desktop-owned sessions.');
+    return saveWorkspaceFile(await directory(session.cwd), text(relative, 'path', 4096), content, hash, path.join(app.getPath('userData'), 'workspace-backups'));
+  });
+  handle('workspaceChanges', async (id) => workspaceChanges(await sessionRoot(id)));
+  handle('workspaceDiff', async (id, relative) => workspaceDiff(await sessionRoot(id), text(relative, 'path', 4096)));
+  handle('notify', (title, body, sessionId) => {
+    // Only when the app is not in front; a notification for the window you are looking at is noise.
+    if (!window || window.isFocused() || !Notification.isSupported()) return;
+    const notification = new Notification({ title: text(title, 'title', 200), body: typeof body === 'string' ? body.slice(0, 300) : '', silent: false });
+    const target = typeof sessionId === 'string' && sessionId.length <= 4096 ? sessionId : undefined;
+    notification.on('click', () => {
+      if (!window) return;
+      if (window.isMinimized()) window.restore();
+      window.show(); window.focus();
+      if (target) window.webContents.send('prime:notification-click', target);
+    });
+    notification.show();
+  });
+  handle('saveText', async (name, content) => {
+    if (!window) return false;
+    const fileName = path.basename(text(name, 'file name', 200)).replace(/[^\w. -]/g, '_');
+    const data = text(content, 'content', 64 * 1024 * 1024);
+    const result = await dialog.showSaveDialog(window, { title: 'Export conversation', defaultPath: path.join(app.getPath('documents'), fileName) });
+    if (result.canceled || !result.filePath) return false;
+    await writeFile(result.filePath, data, { encoding: 'utf8', mode: 0o600 });
+    return true;
   });
   handle('openDirectory', async (value) => {
     const error = await shell.openPath(await directory(value));

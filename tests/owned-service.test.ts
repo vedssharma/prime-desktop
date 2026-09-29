@@ -135,3 +135,18 @@ test('streaming events mark an owned session running and show the partial reply 
   assert.ok(!(await service.getMessages(session.id)).some(m=>m.content==='partial reply'));
  });
 });
+
+test('the agent-reported follow-up queue count is surfaced for owned sessions only when reported', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const session=await service.createSession({cwd:dir,prompt:'Start',allowFileChanges:true});
+  await service.getMessages(session.id);
+  assert.equal((await service.listSessions())[0].queuedCount,0);
+  await service.sendMessage(session.id,'QUEUE_ONE');
+  await service.sendMessage(session.id,'QUEUE_ONE');
+  await service.getMessages(session.id);
+  assert.equal((await service.listSessions())[0].queuedCount,2);
+  await service.sendMessage(session.id,'DRAIN_QUEUE');
+  await service.getMessages(session.id);
+  assert.equal((await service.listSessions())[0].queuedCount,0);
+ });
+});

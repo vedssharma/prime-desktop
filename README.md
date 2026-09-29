@@ -56,6 +56,12 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 - Keep separate unsent drafts for each session while the app is open.
 - Remember the last workspace and model selection across launches.
 - Configure appearance, readability, and connection paths without changing CLI state.
+- Export or copy a conversation as Markdown or JSON (session menu or command palette).
+- Syntax-highlighted code blocks and one-line previews of tool output.
+- Native notifications when a session finishes while the app is in the background (Settings → Readability).
+- Pin sessions, add local tags, filter by tag, and group the sidebar by date or workspace. Pins and tags are stored only in this app.
+- Command palette (Cmd/Ctrl+K) for actions and jumping between sessions.
+- Read-only workspace panel: Git changes with diffs, and a file browser with previews. Paths are confined to the session's folder, symlinks are not followed, and Git is run with external diff and fsmonitor hooks disabled. This is a viewer, not a sandbox for agent tools.
 - Preserve saved desktop history when a session closes. Closed sessions are read-only in this first owned-session release; automatic resume and deletion are not offered.
 
 ## Appearance
@@ -141,8 +147,13 @@ saved default may change too. Shared sessions cannot be switched from this app.
   app display names are local metadata, not edits to shared CLI history.
 - Quitting closes owned processes and their work; closed history cannot yet be resumed.
 - Ambiguous admission or process loss is never retried automatically.
-- Workspace explorer/editor/diff approval and richer queue controls are future steps,
-  not included in this initial writable integration.
+- The workspace panel can edit existing UTF-8 text files (up to 512 KiB) in desktop-owned sessions only.
+  A save is refused if the file changed on disk since you opened it (for example, the agent wrote to it),
+  and the previous bytes are backed up under the app's `workspace-backups` folder (newest 200 kept).
+  The check and write are not one atomic step. Creating, renaming and deleting files is not offered.
+- The queue shows the agent-reported follow-up count. Queued text, reordering and cancellation, fork,
+  compaction, usage and attachments still need documented RPC support and are future steps.
+- Resuming closed desktop sessions remains disabled by design (see `docs/owned-rpc-design.md`).
 
 `npm run test:electron` uses disposable simulated daemons/RPC processes, including a
 deterministic file write in a temporary workspace. It makes no LLM request.
