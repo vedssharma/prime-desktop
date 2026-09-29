@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   deleteSession: (id: string) => invoke('deleteSession', id),
   chooseDirectory: () => invoke('chooseDirectory'),
   openDirectory: (path: string) => invoke('openDirectory', path),
+  saveText: (suggestedName: string, content: string) => invoke('saveText', suggestedName, content),
 }));

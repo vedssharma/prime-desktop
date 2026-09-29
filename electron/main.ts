@@ -63,6 +63,15 @@ function registerIPC() {
     const result = await dialog.showOpenDialog(window, { title: 'Choose a workspace', properties: ['openDirectory', 'createDirectory'] });
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
+  handle('saveText', async (name, content) => {
+    if (!window) return false;
+    const fileName = path.basename(text(name, 'file name', 200)).replace(/[^\w. -]/g, '_');
+    const data = text(content, 'content', 64 * 1024 * 1024);
+    const result = await dialog.showSaveDialog(window, { title: 'Export conversation', defaultPath: path.join(app.getPath('documents'), fileName) });
+    if (result.canceled || !result.filePath) return false;
+    await writeFile(result.filePath, data, { encoding: 'utf8', mode: 0o600 });
+    return true;
+  });
   handle('openDirectory', async (value) => {
     const error = await shell.openPath(await directory(value));
     if (error) throw new Error(error);
