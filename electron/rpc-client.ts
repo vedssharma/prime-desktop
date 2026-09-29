@@ -54,7 +54,7 @@ export class RpcClient {
     }
     this.pending.clear(); this.listeners.clear();
   }
-  async request(command: RecordValue, mutation = true): Promise<any> {
+  async request(command: RecordValue, mutation = true, timeoutMs?: number): Promise<any> {
     if (!this.alive) throw Error(this.reason);
     if (typeof command.type !== 'string') throw Error('Invalid RPC command');
     const id = randomUUID();
@@ -64,7 +64,7 @@ export class RpcClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(Error(`RPC ${command.type} timed out.${mutation ? ' Its outcome is uncertain. Do not resend automatically.' : ''}`));
-      }, this.launch.timeoutMs ?? 30000);
+      }, timeoutMs ?? this.launch.timeoutMs ?? 30000);
       this.pending.set(id, { resolve, reject, timer, mutation, command: command.type });
       this.child.stdin.write(wire, error => { if (error) this.fail('RPC input disconnected.'); });
     });

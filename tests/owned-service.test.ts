@@ -150,3 +150,22 @@ test('the agent-reported follow-up queue count is surfaced for owned sessions on
   assert.equal((await service.listSessions())[0].queuedCount,0);
  });
 });
+
+test('desktop-owned usage and compaction go through the owned pipe only', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-usage-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const daemon=await fakeDaemon(command=>{assert.equal(command.type,'list');return {sessions:[{sessionId:'shared',activeSessionId:'mutable',cwd:'/shared'}]};});
+ const service=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:daemon.socketPath});
+ try {
+  const session=await service.createSession({cwd:dir,prompt:'hello',allowFileChanges:true});
+  const usage=await service.getSessionUsage(session.id);
+  assert.equal(usage.tokens.total,15);assert.equal(usage.context?.percent,1.5);
+  assert.deepEqual(await service.compactSession(session.id,'Keep decisions'),{tokensBefore:15});
+  assert.equal((await service.getSessionUsage(session.id)).context?.percent,null);
+  await assert.rejects(service.getSessionUsage('shared'),/Read-only compatibility/);
+  await assert.rejects(service.compactSession('shared'),/Read-only compatibility/);
+  await service.closeOwnedSession(session.id);
+  await assert.rejects(service.compactSession(session.id),/closed/);
+  assert(daemon.commands.every(command=>command.type==='list'));
+ }finally{await service.close();await daemon.close();await rm(dir,{recursive:true,force:true});}
+});

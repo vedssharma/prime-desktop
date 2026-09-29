@@ -57,6 +57,8 @@ function registerIPC() {
   handle('closeOwnedSession', id => service.closeOwnedSession(text(id, 'session ID', 4096)));
   handle('sendMessage', (id, message) => service.sendMessage(text(id, 'session ID', 4096), text(message, 'message')));
   handle('interruptSession', (id) => service.interruptSession(text(id, 'session ID', 4096)));
+  handle('getSessionUsage', (id) => service.getSessionUsage(text(id, 'session ID', 4096)));
+  handle('compactSession', (id, instructions) => service.compactSession(text(id, 'session ID', 4096), instructions === undefined || instructions === '' ? undefined : text(instructions, 'instructions', 16 * 1024)));
   handle('renameSession', (id, title) => service.renameSession(text(id, 'session ID', 4096), text(title, 'title', 200)));
   handle('deleteSession', (id) => service.deleteSession(text(id, 'session ID', 4096)));
   handle('chooseDirectory', async () => {

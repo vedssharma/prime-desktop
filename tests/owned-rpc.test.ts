@@ -13,6 +13,7 @@ class FakeRpc implements OwnedRpcTransport {
   commands: { command: Record<string, any>; mutation: boolean }[] = [];
   listeners = new Set<(event: Record<string, any>) => void>();
   failure?: Error;
+  stats?: Record<string, any>;
   constructor(sessionDir: string) { this.state = { sessionId: 'owned-id', sessionFile: join(sessionDir, 'owned.jsonl'), isStreaming: false, isCompacting: false }; }
   async request(command: Record<string, any>, mutation = true) {
     this.commands.push({ command, mutation });
@@ -20,6 +21,8 @@ class FakeRpc implements OwnedRpcTransport {
     if (command.type === 'get_state') return { ...this.state };
     if (command.type === 'get_messages') return { messages: [{ role: 'user', content: 'own transcript' }] };
     if (command.type === 'get_available_models') return { models: [{ provider: 'provider', id: 'model', name: 'Model' }] };
+    if (command.type === 'get_session_stats') return this.stats ?? { sessionId: this.state.sessionId, userMessages: 2, assistantMessages: 2, toolCalls: 3, tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 5, total: 165 }, cost: 0.02, contextUsage: { tokens: 1000, contextWindow: 200000, percent: 0.5 } };
+    if (command.type === 'compact') return { summary: 'summary', firstKeptEntryId: 'e1', tokensBefore: 1000 };
     if (command.type === 'set_model') return { provider: command.provider, id: command.modelId };
     return undefined;
   }
@@ -221,6 +224,45 @@ test('event listeners can unsubscribe and closing detaches from the pipe', async
     emit('message_update');
     assert.deepEqual(seen, ['agent_start']);
     assert.equal(rpc.listeners.size, 0);
+    assert.equal(session.alive, false);
+  });
+});
+
+test('usage statistics are read-only, identity-checked and sanitized', async () => {
+  await fixture(async (session, rpc) => {
+    const usage = await session.stats();
+    assert.equal(usage.tokens.total, 165);
+    assert.deepEqual(usage.context, { tokens: 1000, contextWindow: 200000, percent: 0.5 });
+    assert.ok(rpc.commands.filter(({ command }) => command.type === 'get_session_stats').every(({ mutation }) => !mutation));
+    // After compaction the agent reports null estimates; they must not be shown as zero.
+    rpc.stats = { sessionId: 'owned-id', tokens: { input: -1, output: 'x' }, cost: NaN, contextUsage: { tokens: null, contextWindow: 200000, percent: null } };
+    const cleared = await session.stats();
+    assert.equal(cleared.tokens.input, 0); assert.equal(cleared.cost, 0);
+    assert.deepEqual(cleared.context, { tokens: null, contextWindow: 200000, percent: null });
+    rpc.stats = { sessionId: 'another-session', tokens: {} };
+    await assert.rejects(session.stats(), /Invalid owned session statistics/);
+  });
+});
+
+test('compaction needs an idle session, uses a long timeout, and never resends after an uncertain result', async () => {
+  await fixture(async (session, rpc) => {
+    const result = await session.compact('  Focus on code  ');
+    assert.deepEqual(result, { tokensBefore: 1000 });
+    const sent = rpc.commands.find(({ command }) => command.type === 'compact')!;
+    assert.deepEqual(sent.command, { type: 'compact', customInstructions: 'Focus on code' });
+    assert.equal(sent.mutation, true);
+    await session.compact();
+    assert.deepEqual(rpc.commands.filter(({ command }) => command.type === 'compact').at(-1)?.command, { type: 'compact' });
+    const before = rpc.commands.filter(({ command }) => command.type === 'compact').length;
+    for (const busy of [{ isStreaming: true }, { isCompacting: true }, { unfinishedActionCount: 1 }, { sessionActions: { queuedCount: 1 } }]) {
+      Object.assign(rpc.state, { isStreaming: false, isCompacting: false, unfinishedActionCount: 0, sessionActions: undefined }, busy);
+      await assert.rejects(session.compact(), /idle/);
+    }
+    assert.equal(rpc.commands.filter(({ command }) => command.type === 'compact').length, before);
+    Object.assign(rpc.state, { isStreaming: false, isCompacting: false, unfinishedActionCount: 0, sessionActions: undefined });
+    await assert.rejects(session.compact('x\0y'), /instructions/);
+    rpc.failure = Error('RPC compact timed out. Its outcome is uncertain. Do not resend automatically.');
+    await assert.rejects(session.compact(), /uncertain/);
     assert.equal(session.alive, false);
   });
 });

@@ -21,6 +21,8 @@ test.beforeEach(async ({ page }) => {
       closeOwnedSession: async () => { throw Error('Owned process did not exit'); },
       sendMessage: async () => {},
       interruptSession: async () => {},
+      getSessionUsage: async () => ({ userMessages: 1, assistantMessages: 1, toolCalls: 2, tokens: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0, total: 1500 }, cost: 0.0042, context: { tokens: 1500, contextWindow: 200000, percent: 0.75 } }),
+      compactSession: async (id: string, instructions?: string) => { (window as any).__calls.push(['compact', id, instructions]); return { tokensBefore: 1500 }; },
       renameSession: async () => {},
       deleteSession: async () => {},
       copyText: async (text: string) => { (window as any).__calls.push(['copy', text]); },
@@ -120,4 +122,18 @@ test('message times include the date for messages from earlier days', async ({ p
   await expect(old).toContainText('Mar 5, 2024');
   await expect(old).toHaveAttribute('datetime', '2024-03-05T12:00:00.000Z');
   await expect(page.locator('.message', { hasText: 'Fresh answer' }).locator('time')).toHaveText(/^\d{1,2}:\d{2}/);
+});
+
+test('an owned session shows usage and compacts on demand; shared sessions do not', async ({ page }) => {
+  await open(page);
+  await select(page, 'Owned session');
+  await page.getByText('Work & queue status').click();
+  await expect(page.getByText(/1,500 tokens/)).toBeVisible();
+  await expect(page.getByText(/Context: 1,500 of 200,000 tokens \(1%\)/)).toBeVisible();
+  await page.getByRole('button', { name: 'Compact context' }).click();
+  await expect(page.getByText(/Context compacted from about 1,500 tokens/)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__calls.filter((call: any[]) => call[0] === 'compact'))).toEqual([['compact', 'owned', undefined]]);
+  await select(page, 'Shared session');
+  await page.getByText('Work & queue status').click();
+  await expect(page.getByRole('button', { name: 'Compact context' })).toHaveCount(0);
 });
