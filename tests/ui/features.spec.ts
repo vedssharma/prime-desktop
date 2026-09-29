@@ -81,3 +81,24 @@ test('the notification preference can be turned off in settings', async ({ page 
   await box.uncheck();
   expect(await page.evaluate(() => localStorage.getItem('session-dock.notifications.v1'))).toBe('off');
 });
+
+test('pins, tags, filters and regroups sessions locally', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Second task/ }).click();
+  await page.getByRole('button', { name: 'Session actions' }).click();
+  await page.getByRole('button', { name: 'Pin session' }).click();
+  await expect(page.locator('.session-group h2').first()).toHaveText('Pinned');
+  await page.getByRole('button', { name: 'Session actions' }).click();
+  await page.getByRole('button', { name: 'Edit tags' }).click();
+  await page.getByRole('textbox', { name: 'Tags' }).fill('urgent, Bug');
+  await page.getByRole('button', { name: 'Save tags' }).click();
+  await expect(page.getByRole('button', { name: /Second task/ })).toContainText('urgent, Bug');
+  await page.getByRole('button', { name: 'urgent', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Explore the workspace/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'urgent', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Explore the workspace/ })).toBeVisible();
+  await page.getByLabel('Group sessions by').selectOption('workspace');
+  await expect(page.locator('.session-group h2')).toHaveText(['Pinned', 'project']);
+  await page.reload();
+  await expect(page.locator('.session-group h2').first()).toHaveText('Pinned');
+});

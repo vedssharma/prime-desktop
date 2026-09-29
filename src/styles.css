@@ -555,3 +555,11 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 .tok-comment{color:var(--muted);font-style:italic}
 .tool-preview{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.75;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .display-settings label.checkbox-setting{justify-content:flex-start;gap:10px;line-height:1.5}
+
+.sidebar-controls{margin:0 0 12px;display:flex;flex-direction:column;gap:8px;font-size:10px;color:var(--sidebar-muted)}
+.sidebar-controls label{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sidebar-controls select{background:var(--sidebar-hover);color:var(--sidebar-text);border:1px solid var(--sidebar-selected-border);border-radius:5px;padding:3px 6px;font:inherit}
+.tag-filter{display:flex;flex-wrap:wrap;gap:5px}
+.tag-filter button{border:1px solid var(--sidebar-selected-border);background:none;color:var(--sidebar-muted);border-radius:999px;padding:2px 8px;font:inherit;cursor:pointer}
+.tag-filter button[aria-pressed='true']{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.sidebar-controls p{margin:0;color:var(--sidebar-text)}
