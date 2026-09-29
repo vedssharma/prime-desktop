@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const now = new Date().toISOString();
-    const sessions = [
+    let sessions = [
       { id: 's1', title: 'Explore the workspace', cwd: '/tmp/project', model: 'test/model', status: 'idle', createdAt: now, updatedAt: now },
       { id: 's2', title: 'Second task', cwd: '/tmp/other', model: 'test/model', status: 'idle', createdAt: now, updatedAt: now },
     ];
@@ -21,6 +21,8 @@ test.beforeEach(async ({ page }) => {
       getMessages: async (id: string) => messages[id] || [],
       createSession: async () => sessions[0], sendMessage: async () => {}, interruptSession: async () => {},
       renameSession: async () => {}, deleteSession: async () => {}, setSessionModel: async () => {}, closeOwnedSession: async () => {},
+      notify: async (title: string, body: string, id: string) => log('notify', title, body, id),
+      onNotificationClick: (listener: (id: string) => void) => { (window as any).__click = listener; return () => {}; },
       copyText: async (text: string) => log('copy', text),
       saveText: async (name: string, content: string) => { log('save', name, content); return true; },
       chooseDirectory: async () => '/tmp/chosen', openDirectory: async (path: string) => log('open', path),
@@ -52,4 +54,30 @@ test('highlights fenced code without changing its copied text and previews tool 
   await expect(block.locator('.tok-number')).toHaveText('42');
   await expect(block.locator('.tok-comment')).toHaveText('// note');
   await expect(block).toHaveText('const answer = 42; // note\n');
+});
+
+test('notifies once when a running session finishes and opens it from the notification', async ({ page }) => {
+  await page.addInitScript(() => {
+    const api = (window as any).prime;
+    let polls = 0;
+    api.listSessions = async () => {
+      polls++;
+      return [{ id: 's2', title: 'Second task', cwd: '/tmp/other', model: '', status: polls < 2 ? 'running' : 'idle', createdAt: '', updatedAt: '' }];
+    };
+  });
+  await page.goto('/');
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__calls)).filter((c: any[]) => c[0] === 'notify').length, { timeout: 15000 }).toBe(1);
+  const call = (await page.evaluate(() => (window as any).__calls)).find((c: any[]) => c[0] === 'notify');
+  expect(call).toEqual(['notify', 'Session finished', 'Second task', 's2']);
+  await page.evaluate(() => (window as any).__click('s2'));
+  await expect(page.locator('.breadcrumb strong')).toHaveText('Second task');
+});
+
+test('the notification preference can be turned off in settings', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const box = page.getByLabel(/Notify me when a session finishes/);
+  await expect(box).toBeChecked();
+  await box.uncheck();
+  expect(await page.evaluate(() => localStorage.getItem('session-dock.notifications.v1'))).toBe('off');
 });

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, clipboard } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, clipboard, Notification } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
@@ -62,6 +62,19 @@ function registerIPC() {
     if (!window) return null;
     const result = await dialog.showOpenDialog(window, { title: 'Choose a workspace', properties: ['openDirectory', 'createDirectory'] });
     return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  handle('notify', (title, body, sessionId) => {
+    // Only when the app is not in front; a notification for the window you are looking at is noise.
+    if (!window || window.isFocused() || !Notification.isSupported()) return;
+    const notification = new Notification({ title: text(title, 'title', 200), body: typeof body === 'string' ? body.slice(0, 300) : '', silent: false });
+    const target = typeof sessionId === 'string' && sessionId.length <= 4096 ? sessionId : undefined;
+    notification.on('click', () => {
+      if (!window) return;
+      if (window.isMinimized()) window.restore();
+      window.show(); window.focus();
+      if (target) window.webContents.send('prime:notification-click', target);
+    });
+    notification.show();
   });
   handle('saveText', async (name, content) => {
     if (!window) return false;

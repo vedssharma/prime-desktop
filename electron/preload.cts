@@ -18,5 +18,11 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   deleteSession: (id: string) => invoke('deleteSession', id),
   chooseDirectory: () => invoke('chooseDirectory'),
   openDirectory: (path: string) => invoke('openDirectory', path),
+  notify: (title: string, body: string, sessionId?: string) => invoke('notify', title, body, sessionId),
+  onNotificationClick: (listener: (sessionId: string) => void) => {
+    const wrapped = (_event: unknown, sessionId: unknown) => { if (typeof sessionId === 'string') listener(sessionId); };
+    ipcRenderer.on('prime:notification-click', wrapped);
+    return () => { ipcRenderer.removeListener('prime:notification-click', wrapped); };
+  },
   saveText: (suggestedName: string, content: string) => invoke('saveText', suggestedName, content),
 }));

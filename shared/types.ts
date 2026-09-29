@@ -48,6 +48,8 @@ export interface PrimeAPI {
   copyText(text: string): Promise<void>;
   chooseDirectory(): Promise<string | null>;
   openDirectory(path: string): Promise<void>;
+  notify(title: string, body: string, sessionId?: string): Promise<void>;
+  onNotificationClick(listener: (sessionId: string) => void): () => void;
   saveText(suggestedName: string, content: string): Promise<boolean>;
 }
 declare global { interface Window { prime: PrimeAPI; } }

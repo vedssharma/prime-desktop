@@ -14,6 +14,7 @@ import { groupConversation } from './trace';
 import { useRevealedText } from './reveal';
 import { applyAppearance, loadAppearance, saveAppearance, type Appearance } from './appearance';
 import { conversationToJson, conversationToMarkdown, exportFileName, type ExportFormat } from './export';
+import { finishedSessions, loadNotify, notificationFor } from './notify';
 import { languageFor, tokenize } from './highlight';
 import { errorText, folderName, toolPreview, messageTime, relativeTime } from './format';
 
@@ -258,6 +259,16 @@ export default function App() {
     const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); if (!dialogRef.current) newSession(); } if (event.key === 'Escape') { if (dialogPendingRef.current) return; setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
     window.addEventListener('keydown', keydown); return () => window.removeEventListener('keydown', keydown);
   }, [newSession]);
+
+  const lastStatuses = useRef(new Map<string, Session['status']>());
+  useEffect(() => {
+    if (loadNotify()) for (const session of finishedSessions(lastStatuses.current, sessions)) {
+      const { title, body } = notificationFor(session);
+      void Promise.resolve(window.prime.notify?.(title, body, session.id)).catch(() => {});
+    }
+    lastStatuses.current = new Map(sessions.map(session => [session.id, session.status]));
+  }, [sessions]);
+  useEffect(() => window.prime.onNotificationClick?.(id => { if (!dialogRef.current) { setActiveId(id); setSidebarOpen(false); setMenuOpen(false); } }), []);
 
   const grouped = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);

@@ -554,3 +554,4 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 .tok-number{color:var(--syn-number)}
 .tok-comment{color:var(--muted);font-style:italic}
 .tool-preview{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.75;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.display-settings label.checkbox-setting{justify-content:flex-start;gap:10px;line-height:1.5}
