@@ -8,3 +8,8 @@ export const messageTime = (value: string) => {
   if (date.toDateString() === now.toDateString()) return time;
   return `${date.toLocaleDateString([], { month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) })}, ${time}`;
 };
+// One-line preview of tool output for the collapsed summary: the first non-empty line, shortened.
+export const toolPreview = (content: string, max = 90) => {
+  const line = content.split('\n').map(part => part.trim()).find(Boolean) ?? '';
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+};

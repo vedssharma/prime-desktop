@@ -1,6 +1,6 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { errorText, folderName, messageTime, relativeTime } from '../src/format.js';
+import { errorText, folderName, messageTime, relativeTime, toolPreview } from '../src/format.js';
 
 test('folder names come from the last path segment on POSIX and Windows paths', () => {
   assert.equal(folderName('/Users/me/project'), 'project');
@@ -46,4 +46,10 @@ test('error text prefers the Error message and stringifies anything else', () =>
   assert.equal(errorText('plain'), 'plain');
   assert.equal(errorText(42), '42');
   assert.equal(errorText(undefined), 'undefined');
+});
+
+test('tool previews use the first non-empty line and are shortened', () => {
+  assert.equal(toolPreview('\n  \n  npm test  \nsecond'), 'npm test');
+  assert.equal(toolPreview(''), '');
+  assert.equal(toolPreview('x'.repeat(200), 10), 'xxxxxxxxx…');
 });

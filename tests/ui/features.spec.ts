@@ -43,3 +43,13 @@ test('exports the open conversation as Markdown and copies it', async ({ page })
   await page.getByRole('button', { name: 'Copy as Markdown' }).click();
   await expect(page.getByText('Conversation copied as Markdown.')).toBeVisible();
 });
+
+test('highlights fenced code without changing its copied text and previews tool output', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Explore the workspace/ }).click();
+  const block = page.locator('.code-block code');
+  await expect(block.locator('.tok-keyword')).toHaveText('const');
+  await expect(block.locator('.tok-number')).toHaveText('42');
+  await expect(block.locator('.tok-comment')).toHaveText('// note');
+  await expect(block).toHaveText('const answer = 42; // note\n');
+});

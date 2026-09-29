@@ -14,7 +14,8 @@ import { groupConversation } from './trace';
 import { useRevealedText } from './reveal';
 import { applyAppearance, loadAppearance, saveAppearance, type Appearance } from './appearance';
 import { conversationToJson, conversationToMarkdown, exportFileName, type ExportFormat } from './export';
-import { errorText, folderName, messageTime, relativeTime } from './format';
+import { languageFor, tokenize } from './highlight';
+import { errorText, folderName, toolPreview, messageTime, relativeTime } from './format';
 
 const isElectron = navigator.userAgent.includes('Electron');
 const newSessionShortcut = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘ N' : 'Ctrl N';
@@ -37,8 +38,13 @@ const markdownComponents: Components = {
   a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
   img: ({ alt, src }) => <a href={src} target="_blank" rel="noreferrer">[Image: {alt || 'View image'}]</a>,
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+  code: ({ className, children }) => {
+    const language = languageFor(className);
+    if (!language || typeof children !== 'string') return <code className={className}>{children}</code>;
+    return <code className={className}>{tokenize(children, language).map((token, index) => token.kind === 'plain' ? token.text : <span key={index} className={`tok-${token.kind}`}>{token.text}</span>)}</code>;
+  },
 };
-function ToolCall({ step }: { step: Message }) { return <details className="tool-message"><summary><Terminal size={14} /><span>{step.toolName || 'Tool call'}</span><ChevronRight size={14} /></summary><pre>{step.content || 'No output'}</pre></details>; }
+function ToolCall({ step }: { step: Message }) { return <details className="tool-message"><summary><Terminal size={14} /><span>{step.toolName || 'Tool call'}</span><span className="tool-preview">{toolPreview(step.content)}</span><ChevronRight size={14} /></summary><pre>{step.content || 'No output'}</pre></details>; }
 const MessageView = memo(function MessageView({ message, animate = false }: { message: Message; animate?: boolean }) {
   const [copied, setCopied] = useState(false);
   const revealed = useRevealedText(message.content, animate && message.role === 'assistant');

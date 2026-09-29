@@ -545,3 +545,12 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 .provider-settings{border-top:1px solid var(--border);padding-top:16px;margin-top:20px}.provider-settings summary{cursor:pointer;color:var(--accent-text)}.provider-content p{line-height:1.6}.provider-steps{padding-left:22px}.provider-steps li{margin:12px 0}.provider-steps button{margin:6px}.provider-toolbar{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}.provider-search{width:100%;padding:8px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:5px}.provider-catalog{max-height:240px;overflow:auto}.provider-group ul{padding-left:18px}.provider-group li{margin:8px 0;overflow-wrap:anywhere}.provider-group code{display:block;font-size:11px;color:var(--muted)}.provider-count{font-size:12px;color:var(--muted)}
 
 .provider-search input{display:block;width:100%;margin-top:6px;padding:7px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:4px}
+
+/* Syntax highlighting and tool-call previews */
+:root{--syn-keyword:#6d28d9;--syn-string:#0b6b5f;--syn-number:#9a4a06}
+:root[data-theme="dark"]{--syn-keyword:#c9adff;--syn-string:#86dccb;--syn-number:#f2b878}
+.tok-keyword{color:var(--syn-keyword)}
+.tok-string{color:var(--syn-string)}
+.tok-number{color:var(--syn-number)}
+.tok-comment{color:var(--muted);font-style:italic}
+.tool-preview{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.75;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
