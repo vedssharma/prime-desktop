@@ -147,8 +147,13 @@ saved default may change too. Shared sessions cannot be switched from this app.
   app display names are local metadata, not edits to shared CLI history.
 - Quitting closes owned processes and their work; closed history cannot yet be resumed.
 - Ambiguous admission or process loss is never retried automatically.
-- Workspace explorer/editor/diff approval and richer queue controls are future steps,
-  not included in this initial writable integration.
+- The workspace panel can edit existing UTF-8 text files (up to 512 KiB) in desktop-owned sessions only.
+  A save is refused if the file changed on disk since you opened it (for example, the agent wrote to it),
+  and the previous bytes are backed up under the app's `workspace-backups` folder (newest 200 kept).
+  The check and write are not one atomic step. Creating, renaming and deleting files is not offered.
+- The queue shows the agent-reported follow-up count. Queued text, reordering and cancellation, fork,
+  compaction, usage and attachments still need documented RPC support and are future steps.
+- Resuming closed desktop sessions remains disabled by design (see `docs/owned-rpc-design.md`).
 
 `npm run test:electron` uses disposable simulated daemons/RPC processes, including a
 deterministic file write in a temporary workspace. It makes no LLM request.

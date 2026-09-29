@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, File as FileIcon, Folder, GitBranch, LoaderC
 import type { WorkspaceChanges, WorkspaceFile, WorkspaceListing } from '../shared/types';
 import { errorText } from './format';
 import { languageForFile, tokenize } from './highlight';
+import { fromEditable, toEditable, usesCrlf } from './eol';
 
 type Tab = 'changes' | 'files';
 const sizeLabel = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -36,7 +37,7 @@ function FileNode({ name, path, depth, sessionId, listings, expand, open, select
   </li>;
 }
 
-export default function WorkspacePanel({ sessionId, cwd, running, onClose }: { sessionId: string; cwd: string; running: boolean; onClose: () => void }) {
+export default function WorkspacePanel({ sessionId, cwd, running, canEdit, onClose }: { sessionId: string; cwd: string; running: boolean; canEdit: boolean; onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('changes');
   const [changes, setChanges] = useState<WorkspaceChanges | null>(null);
   const [changesError, setChangesError] = useState('');
@@ -46,6 +47,11 @@ export default function WorkspacePanel({ sessionId, cwd, running, onClose }: { s
   const [listings, setListings] = useState<Record<string, WorkspaceListing | 'loading' | string>>({});
   const [file, setFile] = useState<WorkspaceFile | null>(null);
   const [fileError, setFileError] = useState('');
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveNotice, setSaveNotice] = useState('');
+  const [conflict, setConflict] = useState(false);
+  const dirty = draft !== null && file !== null && draft !== toEditable(file.content);
   const current = useRef(sessionId);
   current.current = sessionId;
   const changeRequest = useRef(0);
@@ -59,7 +65,7 @@ export default function WorkspacePanel({ sessionId, cwd, running, onClose }: { s
   }, [sessionId]);
 
   // Everything shown belongs to one session; switching sessions starts from a clean panel.
-  useEffect(() => { setChanges(null); setDiff(null); setDiffError(''); setListings({}); setFile(null); setFileError(''); void loadChanges(); }, [sessionId, loadChanges]);
+  useEffect(() => { setChanges(null); setDiff(null); setDiffError(''); setListings({}); setFile(null); setFileError(''); setDraft(null); setSaveNotice(''); setConflict(false); void loadChanges(); }, [sessionId, loadChanges]);
   // A run that just ended is the moment the changes are most likely to be new.
   const wasRunning = useRef(running);
   useEffect(() => { if (wasRunning.current && !running) void loadChanges(); wasRunning.current = running; }, [running, loadChanges]);
@@ -77,17 +83,41 @@ export default function WorkspacePanel({ sessionId, cwd, running, onClose }: { s
     catch (error) { if (current.current === id) setListings(previous => ({ ...previous, [path]: errorText(error) })); }
   }
   useEffect(() => { if (tab === 'files' && listings[''] === undefined) void expand(''); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const confirmDiscard = () => !dirty || window.confirm('Discard your unsaved edits?');
   async function openFile(path: string) {
-    const id = sessionId; setFileError(''); setFile(null);
+    if (!confirmDiscard()) return;
+    const id = sessionId; setFileError(''); setFile(null); setDraft(null); setSaveNotice(''); setConflict(false);
     try { const result = await window.prime.workspaceRead(id, path); if (current.current === id) setFile(result); }
     catch (error) { if (current.current === id) setFileError(errorText(error)); }
   }
 
+  async function reloadFile() {
+    if (!file) return;
+    const path = file.path, id = sessionId;
+    setConflict(false); setFileError('');
+    try { const result = await window.prime.workspaceRead(id, path); if (current.current === id) { setFile(result); setDraft(null); setSaveNotice('Reloaded from disk.'); void loadChanges(); } }
+    catch (error) { if (current.current === id) setFileError(errorText(error)); }
+  }
+  async function save() {
+    if (!file?.hash || draft === null || saving) return;
+    const id = sessionId, path = file.path;
+    setSaving(true); setFileError(''); setSaveNotice(''); setConflict(false);
+    try {
+      const result = await window.prime.workspaceSave(id, path, fromEditable(draft, usesCrlf(file.content)), file.hash);
+      if (current.current !== id) return;
+      setFile(result.file); setDraft(null); setSaveNotice(`Saved. The previous version was backed up to ${result.backup}`); void loadChanges();
+    } catch (error) {
+      if (current.current !== id) return;
+      const message = errorText(error);
+      setConflict(/CHANGED_ON_DISK/.test(message));
+      setFileError(message.replace(/^(?:Error invoking remote method '[^']*': )?(?:Error: )?CHANGED_ON_DISK: /, ''));
+    } finally { setSaving(false); }
+  }
   const language = file && !file.binary ? languageForFile(file.path) : undefined;
   const root = listings[''];
   return <aside className="workspace-panel" aria-label="Workspace">
     <header><div role="tablist" aria-label="Workspace views">
-      <button role="tab" aria-selected={tab === 'changes'} onClick={() => setTab('changes')}><GitBranch size={13} />Changes{changes?.isRepo ? ` (${changes.changes.length}${changes.truncated ? '+' : ''})` : ''}</button>
+      <button role="tab" aria-selected={tab === 'changes'} onClick={() => { if (tab === 'files' && !confirmDiscard()) return; setDraft(null); setTab('changes'); }}><GitBranch size={13} />Changes{changes?.isRepo ? ` (${changes.changes.length}${changes.truncated ? '+' : ''})` : ''}</button>
       <button role="tab" aria-selected={tab === 'files'} onClick={() => setTab('files')}><Folder size={13} />Files</button>
     </div>
     <button className="icon-button" aria-label="Refresh workspace" onClick={() => { void loadChanges(); setListings({}); if (tab === 'files') void expand(''); }}>{loadingChanges ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={15} />}</button>
@@ -111,8 +141,18 @@ export default function WorkspacePanel({ sessionId, cwd, running, onClose }: { s
         {root.truncated && <li><p className="tree-note">Only the first entries are shown.</p></li>}
       </ul>}
       {fileError && <p role="alert" className="workspace-error">{fileError}</p>}
-      {file && <div className="workspace-view"><p className="workspace-file-name">{file.path} · {sizeLabel(file.size)}</p>
-        {file.binary ? <p className="workspace-empty">Binary file — no preview.</p> : <pre className="file-view" aria-label="File contents"><code>{language ? tokenize(file.content, language).map((token, index) => token.kind === 'plain' ? token.text : <span key={index} className={`tok-${token.kind}`}>{token.text}</span>) : file.content}</code></pre>}
+      {file && <div className="workspace-view"><p className="workspace-file-name">{file.path} · {sizeLabel(file.size)}{dirty ? ' · unsaved changes' : ''}</p>
+        {canEdit && file.editable && <div className="file-actions">
+          {draft === null ? <button type="button" className="secondary-button" onClick={() => { setDraft(toEditable(file.content)); setSaveNotice(''); }}>Edit</button> : <>
+            <button type="button" className="primary-button" disabled={saving || !dirty} onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>
+            <button type="button" className="secondary-button" disabled={saving} onClick={() => { if (confirmDiscard()) { setDraft(null); setConflict(false); setFileError(''); } }}>Cancel</button></>}
+          {conflict && <button type="button" className="secondary-button" onClick={() => void reloadFile()}>Reload from disk</button>}
+        </div>}
+        {!canEdit && !file.binary && <p className="workspace-empty">Editing is available only in desktop-owned sessions.</p>}
+        {canEdit && !file.editable && !file.binary && <p className="workspace-empty">{file.truncated ? 'Too large to edit here.' : 'Not valid UTF-8 text, so it cannot be edited here.'}</p>}
+        {saveNotice && <p className="workspace-empty" role="status">{saveNotice}</p>}
+        {draft !== null ? <textarea className="file-editor" aria-label="Edit file" spellCheck={false} value={draft} onChange={event => setDraft(event.target.value)} />
+          : file.binary ? <p className="workspace-empty">Binary file — no preview.</p> : <pre className="file-view" aria-label="File contents"><code>{language ? tokenize(file.content, language).map((token, index) => token.kind === 'plain' ? token.text : <span key={index} className={`tok-${token.kind}`}>{token.text}</span>) : file.content}</code></pre>}
         {file.truncated && <p className="workspace-empty">Preview truncated to the first {sizeLabel(file.content.length)}.</p>}</div>}
     </div>}
   </aside>;

@@ -169,3 +169,49 @@ test('shows the agent-reported queue count for desktop sessions', async ({ page 
   await page.getByText('Work & queue status', { exact: true }).click();
   await expect(page.getByText(/2 queued follow-ups/)).toBeVisible();
 });
+
+test('edits a file in a desktop-owned session, and surfaces a disk conflict without losing the draft', async ({ page }) => {
+  await page.addInitScript(() => {
+    const api = (window as any).prime;
+    api.listSessions = async () => [{ id: 's1', title: 'Owned', cwd: '/tmp/project', model: '', status: 'idle', createdAt: '', updatedAt: '', ownership: 'desktop', writable: true, lifecycle: 'open' }];
+    api.workspaceRead = async (id: string, path: string) => ({ path, size: 6, binary: false, truncated: false, editable: true, hash: 'a'.repeat(64), content: 'line1\n' });
+    let attempts = 0;
+    api.workspaceSave = async (id: string, path: string, content: string, hash: string) => {
+      (window as any).__calls.push(['save-file', path, content, hash]);
+      if (++attempts === 1) throw new Error("Error invoking remote method 'prime:workspaceSave': Error: CHANGED_ON_DISK: This file changed on disk after you opened it. Reload it to see the new contents; your edit was not saved.");
+      return { file: { path, size: 8, binary: false, truncated: false, editable: true, hash: 'b'.repeat(64), content }, backup: '/backups/x' };
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Owned/ }).click();
+  await page.getByRole('button', { name: 'Workspace files and changes' }).click();
+  const panel = page.getByRole('complementary', { name: 'Workspace' });
+  await panel.getByRole('tab', { name: 'Files' }).click();
+  await panel.getByRole('button', { name: /logo\.png/ }).click();
+  await panel.getByRole('button', { name: 'src', exact: true }).click();
+  await panel.getByRole('button', { name: /a\.ts/ }).click();
+  await panel.getByRole('button', { name: 'Edit', exact: true }).click();
+  await panel.getByRole('textbox', { name: 'Edit file' }).fill('line1\nline2\n');
+  await expect(panel.getByText('unsaved changes')).toBeVisible();
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('alert')).toContainText('changed on disk after you opened it');
+  await expect(panel.getByRole('textbox', { name: 'Edit file' })).toHaveValue('line1\nline2\n');
+  await expect(panel.getByRole('button', { name: 'Reload from disk' })).toBeVisible();
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.getByRole('status')).toContainText('backed up to /backups/x');
+  const saves = (await page.evaluate(() => (window as any).__calls)).filter((c: any[]) => c[0] === 'save-file');
+  expect(saves[1][2]).toBe('line1\nline2\n');
+  expect(saves[1][3]).toBe('a'.repeat(64));
+});
+
+test('shared sessions offer no editing', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Explore the workspace/ }).click();
+  await page.getByRole('button', { name: 'Workspace files and changes' }).click();
+  const panel = page.getByRole('complementary', { name: 'Workspace' });
+  await panel.getByRole('tab', { name: 'Files' }).click();
+  await panel.getByRole('button', { name: 'src', exact: true }).click();
+  await panel.getByRole('button', { name: /a\.ts/ }).click();
+  await expect(panel.getByText('Editing is available only in desktop-owned sessions.')).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+});

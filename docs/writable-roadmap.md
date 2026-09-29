@@ -26,7 +26,7 @@ but no supported login/OAuth/API-key-write API. Provide guided CLI login and ref
 not a fake desktop auth flow or manual auth.json manipulation. Never label an
 available-model catalog as proof of a valid account. Never send /login to the model.
 
-## Step 4 — workspace explorer, editor and review
+## Step 4 — workspace explorer, editor and review (implemented: read-only explorer, Git diff, guarded text editing)
 
 Add explicit workspace grants, path/symlink boundaries, size limits and binary-file
 handling. Direct saves need external-change detection and recoverable backups.

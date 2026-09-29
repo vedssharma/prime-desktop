@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { open, lstat, readdir, realpath } from 'node:fs/promises';
+import { chmod, mkdir, open, lstat, readdir, realpath, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import path from 'node:path';
 
@@ -15,7 +16,8 @@ const HIDDEN = new Set(['.git']);
 
 export interface WorkspaceEntry { name: string; type: 'file' | 'dir' | 'link'; size: number }
 export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; truncated: boolean }
-export interface WorkspaceFile { path: string; size: number; binary: boolean; truncated: boolean; content: string }
+export interface WorkspaceFile { path: string; size: number; binary: boolean; truncated: boolean; content: string; /** SHA-256 of the exact bytes read; only for complete text files. */ hash?: string; editable: boolean }
+export interface WorkspaceSaveResult { file: WorkspaceFile; backup: string }
 export interface WorkspaceChange { path: string; status: string; label: string }
 export interface WorkspaceChanges { isRepo: boolean; changes: WorkspaceChange[]; truncated: boolean; error?: string }
 export interface WorkspaceDiff { path: string; diff: string; truncated: boolean }
@@ -49,6 +51,16 @@ export async function listWorkspace(root: string, relative = ''): Promise<Worksp
 }
 const sortEntries = (entries: WorkspaceEntry[]) => entries.sort((a, b) => Number(b.type === 'dir') - Number(a.type === 'dir') || a.name.localeCompare(b.name));
 
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+/** Text that survives a UTF-8 decode/encode round trip byte-for-byte can be edited without corruption. */
+const roundTrips = (bytes: Buffer) => Buffer.from(bytes.toString('utf8'), 'utf8').equals(bytes);
+function describe(relative: string, size: number, bytes: Buffer): WorkspaceFile {
+  const truncated = size > MAX_FILE_BYTES;
+  const binary = bytes.subarray(0, 8000).includes(0);
+  const complete = !truncated && !binary;
+  return { path: relative, size, binary, truncated, content: binary ? '' : bytes.toString('utf8'), editable: complete && roundTrips(bytes), ...(complete ? { hash: sha256(bytes) } : {}) };
+}
+
 export async function readWorkspaceFile(root: string, relative: string): Promise<WorkspaceFile> {
   const target = await resolveInside(root, relative);
   // O_NONBLOCK keeps a FIFO from hanging the read; only regular files are returned.
@@ -58,10 +70,40 @@ export async function readWorkspaceFile(root: string, relative: string): Promise
     if (!info.isFile()) throw new Error('Only regular files can be previewed.');
     const buffer = Buffer.alloc(Math.min(info.size, MAX_FILE_BYTES));
     const { bytesRead } = buffer.length ? await handle.read(buffer, 0, buffer.length, 0) : { bytesRead: 0 };
-    const bytes = buffer.subarray(0, bytesRead);
-    const binary = bytes.subarray(0, 8000).includes(0);
-    return { path: target.relative, size: info.size, binary, truncated: info.size > MAX_FILE_BYTES, content: binary ? '' : bytes.toString('utf8') };
+    return describe(target.relative, info.size, buffer.subarray(0, bytesRead));
   } finally { await handle.close(); }
+}
+
+const MAX_BACKUPS = 200;
+/**
+ * Save an edit to an existing text file. The caller passes the hash it last read; if the file
+ * changed on disk since (for example, the agent wrote to it), nothing is written. The previous
+ * bytes are copied to `backupDir` first. The check and the write are not one atomic step, so
+ * a change landing in that instant can still be overwritten, but the backup keeps it recoverable.
+ */
+export async function saveWorkspaceFile(root: string, relative: string, content: unknown, expectedHash: unknown, backupDir: string): Promise<WorkspaceSaveResult> {
+  if (typeof content !== 'string' || content.includes('\0') || Buffer.byteLength(content) > MAX_FILE_BYTES) throw new Error('File content must be text of at most 512 KiB.');
+  if (typeof expectedHash !== 'string' || !/^[0-9a-f]{64}$/.test(expectedHash)) throw new Error('Reload the file before saving.');
+  const target = await resolveInside(root, relative);
+  const info = await lstat(target.full);
+  if (!info.isFile()) throw new Error('Only regular files can be edited.');
+  if (info.size > MAX_FILE_BYTES) throw new Error('This file is too large to edit here.');
+  const current = await readFile(target.full);
+  if (current.subarray(0, 8000).includes(0) || !roundTrips(current)) throw new Error('This file is not valid UTF-8 text and cannot be edited here.');
+  if (sha256(current) !== expectedHash) throw new Error('CHANGED_ON_DISK: This file changed on disk after you opened it. Reload it to see the new contents; your edit was not saved.');
+  await mkdir(backupDir, { recursive: true, mode: 0o700 });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backup = path.join(backupDir, `${stamp}-${expectedHash.slice(0, 8)}-${path.basename(target.full).replace(/[^\w.-]/g, '_')}`);
+  await writeFile(backup, current, { mode: 0o600, flag: 'wx' });
+  const temporary = `${target.full}.dock-${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, { mode: 0o600, flag: 'wx' });
+    await chmod(temporary, info.mode & 0o7777);
+    await rename(temporary, target.full);
+  } catch (error) { await rm(temporary, { force: true }); throw error; }
+  const names = (await readdir(backupDir)).sort();
+  for (const old of names.slice(0, Math.max(0, names.length - MAX_BACKUPS))) await rm(path.join(backupDir, old), { force: true });
+  return { file: await readWorkspaceFile(root, relative), backup };
 }
 
 // Never let repository-controlled configuration run programs: no fsmonitor, no external diff or textconv.

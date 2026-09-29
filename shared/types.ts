@@ -34,7 +34,8 @@ export interface CreateSessionInput { prompt: string; cwd: string; model?: strin
 export interface ConnectionConfig { executable: string; socketPath: string; }
 export interface WorkspaceEntry { name: string; type: 'file' | 'dir' | 'link'; size: number }
 export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; truncated: boolean }
-export interface WorkspaceFile { path: string; size: number; binary: boolean; truncated: boolean; content: string }
+export interface WorkspaceFile { path: string; size: number; binary: boolean; truncated: boolean; content: string; hash?: string; editable: boolean }
+export interface WorkspaceSaveResult { file: WorkspaceFile; backup: string }
 export interface WorkspaceChange { path: string; status: string; label: string }
 export interface WorkspaceChanges { isRepo: boolean; changes: WorkspaceChange[]; truncated: boolean; error?: string }
 export interface WorkspaceDiff { path: string; diff: string; truncated: boolean }
@@ -58,6 +59,7 @@ export interface PrimeAPI {
   openDirectory(path: string): Promise<void>;
   workspaceList(id: string, path?: string): Promise<WorkspaceListing>;
   workspaceRead(id: string, path: string): Promise<WorkspaceFile>;
+  workspaceSave(id: string, path: string, content: string, hash: string): Promise<WorkspaceSaveResult>;
   workspaceChanges(id: string): Promise<WorkspaceChanges>;
   workspaceDiff(id: string, path: string): Promise<WorkspaceDiff>;
   notify(title: string, body: string, sessionId?: string): Promise<void>;

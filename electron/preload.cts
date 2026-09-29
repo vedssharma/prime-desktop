@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   openDirectory: (path: string) => invoke('openDirectory', path),
   workspaceList: (id: string, path?: string) => invoke('workspaceList', id, path),
   workspaceRead: (id: string, path: string) => invoke('workspaceRead', id, path),
+  workspaceSave: (id: string, path: string, content: string, hash: string) => invoke('workspaceSave', id, path, content, hash),
   workspaceChanges: (id: string) => invoke('workspaceChanges', id),
   workspaceDiff: (id: string, path: string) => invoke('workspaceDiff', id, path),
   notify: (title: string, body: string, sessionId?: string) => invoke('notify', title, body, sessionId),

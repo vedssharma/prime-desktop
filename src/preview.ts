@@ -20,6 +20,7 @@ export const previewAPI: PrimeAPI = {
   openDirectory: desktopOnly,
   workspaceList: desktopOnly,
   workspaceRead: desktopOnly,
+  workspaceSave: desktopOnly,
   workspaceChanges: desktopOnly,
   workspaceDiff: desktopOnly,
   notify: async () => {},

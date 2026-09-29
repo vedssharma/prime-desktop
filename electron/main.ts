@@ -4,7 +4,7 @@ import path from 'node:path';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { validateConfig, text, directory } from './ipc-validation.js';
 import { PrimeService } from './prime.js';
-import { listWorkspace, readWorkspaceFile, workspaceChanges, workspaceDiff } from './workspace.js';
+import { listWorkspace, readWorkspaceFile, saveWorkspaceFile, workspaceChanges, workspaceDiff } from './workspace.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const devURL = !app.isPackaged ? process.env.PRIME_DESKTOP_DEV_URL : undefined;
@@ -65,15 +65,23 @@ function registerIPC() {
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
   // The renderer names a session, never a directory: the root always comes from the session record.
-  const sessionRoot = async (id: unknown) => {
+  const findSession = async (id: unknown) => {
     const sessionId = text(id, 'session ID', 4096);
     const session = (await service.listSessions()).find(item => item.id === sessionId);
     if (!session) throw new Error('Session not found.');
-    return directory(session.cwd);
+    return session;
   };
+  const sessionRoot = async (id: unknown) => directory((await findSession(id)).cwd);
   const relativePath = (value: unknown) => value === undefined || value === '' ? '' : text(value, 'path', 4096);
   handle('workspaceList', async (id, relative) => listWorkspace(await sessionRoot(id), relativePath(relative)));
   handle('workspaceRead', async (id, relative) => readWorkspaceFile(await sessionRoot(id), text(relative, 'path', 4096)));
+  handle('workspaceSave', async (id, relative, content, hash) => {
+    // Editing needs the explicit workspace trust given when a desktop-owned session was created;
+    // shared CLI sessions keep a read-only view.
+    const session = await findSession(id);
+    if (session.ownership !== 'desktop') throw new Error('Files can be edited only in desktop-owned sessions.');
+    return saveWorkspaceFile(await directory(session.cwd), text(relative, 'path', 4096), content, hash, path.join(app.getPath('userData'), 'workspace-backups'));
+  });
   handle('workspaceChanges', async (id) => workspaceChanges(await sessionRoot(id)));
   handle('workspaceDiff', async (id, relative) => workspaceDiff(await sessionRoot(id), text(relative, 'path', 4096)));
   handle('notify', (title, body, sessionId) => {
