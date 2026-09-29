@@ -19,6 +19,13 @@ export interface Message {
   timestamp?: string;
   toolName?: string;
 }
+export interface SessionUsage {
+  userMessages: number; assistantMessages: number; toolCalls: number;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  cost: number;
+  /** Null values mean the agent has no estimate yet, for example right after compaction. */
+  context?: { tokens: number | null; contextWindow: number | null; percent: number | null };
+}
 export interface ModelOption { id: string; name: string; }
 export interface ConnectionStatus {
   connected: boolean;
@@ -52,6 +59,8 @@ export interface PrimeAPI {
   createSession(input: CreateSessionInput): Promise<Session>;
   sendMessage(id: string, text: string): Promise<void>;
   interruptSession(id: string): Promise<void>;
+  getSessionUsage(id: string): Promise<SessionUsage>;
+  compactSession(id: string, instructions?: string): Promise<{ tokensBefore: number | null }>;
   renameSession(id: string, title: string): Promise<void>;
   deleteSession(id: string): Promise<void>;
   copyText(text: string): Promise<void>;

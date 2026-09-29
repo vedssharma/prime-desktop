@@ -9,7 +9,7 @@ const id = randomUUID(), cwd = value('--cwd'), dir = value('--session-dir');
 mkdirSync(dir, { recursive: true });
 const file = join(dir, id + '.jsonl');
 writeFileSync(file, JSON.stringify({ type: 'session', id, cwd }) + '\n');
-const messages = []; let failState = false; let queued = 0; let model = { provider:'fixture', id:'fixture-model', name:'Fixture model' };
+const messages = []; let failState = false; let queued = 0; let compacted = false; let model = { provider:'fixture', id:'fixture-model', name:'Fixture model' };
 function event(value) { process.stdout.write(JSON.stringify(value)+'\n'); }
 function reply(command, success, data, error) { process.stdout.write(JSON.stringify({ type:'response',command:command.type,id:command.id,success,data,error })+'\n'); }
 let buffer='';process.stdin.setEncoding('utf8');
@@ -34,6 +34,8 @@ function handle(command) {
  if(command.type==='set_model'){model={provider:command.provider,id:command.modelId};return reply(command,true,model);}
  if(command.type==='get_available_models')return reply(command,true,{models:[model]});
  if(command.type==='abort')return reply(command,true);
+ if(command.type==='get_session_stats')return reply(command,true,{sessionId:id,userMessages:messages.length,assistantMessages:0,toolCalls:0,tokens:{input:10,output:5,cacheRead:0,cacheWrite:0,total:15},cost:0.001,contextUsage:{tokens:compacted?null:15,contextWindow:1000,percent:compacted?null:1.5}});
+ if(command.type==='compact'){compacted=true;return reply(command,true,{summary:'s',firstKeptEntryId:'e',tokensBefore:15,customInstructions:command.customInstructions});}
  reply(command,false,undefined,'Unsupported fixture command');
 }
 process.stdin.on('end',()=>process.exit(0));

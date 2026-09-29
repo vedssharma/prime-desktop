@@ -20,9 +20,15 @@ export interface OwnedRpcState extends RecordValue {
 }
 export interface OwnedRpcTransport {
   readonly alive: boolean;
-  request(command: RecordValue, mutation?: boolean): Promise<any>;
+  request(command: RecordValue, mutation?: boolean, timeoutMs?: number): Promise<any>;
   onEvent(listener: (event: RecordValue) => void): () => void;
   close(): Promise<void>;
+}
+export interface OwnedRpcStats {
+  userMessages: number; assistantMessages: number; toolCalls: number;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  cost: number;
+  context?: { tokens: number | null; contextWindow: number | null; percent: number | null };
 }
 export type OwnedRpcFactory = (launch: RpcLaunch) => OwnedRpcTransport;
 
@@ -133,9 +139,9 @@ export class OwnedRpcSession {
     return { state, messages: result.messages };
   }
 
-  private async mutate(command: RecordValue): Promise<any> {
+  private async mutate(command: RecordValue, timeoutMs?: number): Promise<any> {
     this.assertAlive();
-    try { return await this.rpc.request(command, true); }
+    try { return await this.rpc.request(command, true, timeoutMs); }
     catch (error) {
       // A missing admission response is not a rejection. Do not offer retry on
       // this pipe after an uncertain result, or automatically recreate it.
@@ -159,6 +165,45 @@ export class OwnedRpcSession {
   async abort(): Promise<void> {
     await this.getState();
     await this.mutate({ type: 'abort' });
+  }
+
+  /** Token, cost and context-window statistics. Read-only; identity is verified on both sides of the read. */
+  async stats(): Promise<OwnedRpcStats> {
+    await this.getState();
+    const result: unknown = await this.rpc.request({ type: 'get_session_stats' }, false);
+    await this.getState();
+    return OwnedRpcSession.parseStats(result, this.id);
+  }
+
+  private static parseStats(value: unknown, sessionId: string): OwnedRpcStats {
+    const count = (input: unknown): number => typeof input === 'number' && Number.isFinite(input) && input >= 0 ? input : 0;
+    if (!isRecord(value) || value.sessionId !== sessionId || !isRecord(value.tokens)) throw Error('Invalid owned session statistics.');
+    const usage = isRecord(value.contextUsage) ? value.contextUsage : undefined;
+    // After compaction the agent reports null until a fresh response arrives; keep that distinct from zero.
+    const optional = (input: unknown): number | null => typeof input === 'number' && Number.isFinite(input) && input >= 0 ? input : null;
+    return {
+      userMessages: count(value.userMessages), assistantMessages: count(value.assistantMessages), toolCalls: count(value.toolCalls),
+      tokens: { input: count(value.tokens.input), output: count(value.tokens.output), cacheRead: count(value.tokens.cacheRead), cacheWrite: count(value.tokens.cacheWrite), total: count(value.tokens.total) },
+      cost: count(value.cost),
+      ...(usage ? { context: { tokens: optional(usage.tokens), contextWindow: optional(usage.contextWindow), percent: optional(usage.percent) } } : {}),
+    };
+  }
+
+  /**
+   * Manual context compaction. It rewrites the agent's working context inside this
+   * same persistent session; it is not a fork and never changes the session identity.
+   */
+  async compact(instructions?: string): Promise<{ tokensBefore: number | null }> {
+    if (instructions !== undefined && (typeof instructions !== 'string' || Buffer.byteLength(instructions) > 16 * 1024 || instructions.includes('\0'))) throw Error('Compaction instructions must be text up to 16 KiB.');
+    const state = await this.getState();
+    if (state.isStreaming || state.isCompacting || state.unfinishedActionCount > 0 || state.sessionActions?.queuedCount > 0) {
+      throw Error('Wait until the session is idle before compacting its context.');
+    }
+    const custom = instructions?.trim();
+    // Summarizing a long transcript takes a model call; allow far longer than a state read.
+    const result: unknown = await this.mutate({ type: 'compact', ...(custom ? { customInstructions: custom } : {}) }, 5 * 60_000);
+    await this.getState();
+    return { tokensBefore: isRecord(result) && typeof result.tokensBefore === 'number' ? result.tokensBefore : null };
   }
 
   async availableModels(): Promise<RecordValue[]> {

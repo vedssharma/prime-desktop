@@ -612,3 +612,4 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 .file-actions{display:flex;gap:8px;margin:8px 14px}
 .file-actions button{padding:5px 12px;font-size:11px}
 .file-editor{display:block;width:calc(100% - 28px);margin:8px 14px;min-height:260px;max-height:52vh;resize:vertical;box-sizing:border-box;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.6;color:var(--text);background:var(--surface-subtle);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre;overflow:auto}
+.session-usage p{margin:6px 0}.session-usage button{font:inherit;font-size:inherit;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);cursor:pointer}.session-usage button:disabled{opacity:.5;cursor:default}

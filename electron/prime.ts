@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { access, readFile, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { OwnedRpcSession } from './owned-rpc.js';
+import { OwnedRpcSession, type OwnedRpcStats as SessionUsage } from './owned-rpc.js';
 import { OwnedStore, type OwnedMetadata } from './owned-store.js';
 import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -314,6 +314,13 @@ export class PrimeService {
     const slash = model.indexOf('/'); if (slash < 1 || slash === model.length - 1) throw Error('Choose an available provider/model.');
     const entry = await this.liveOwned(id); await entry.rpc.setModel(model.slice(0, slash), model.slice(slash + 1));
     entry.state = (await entry.rpc.refresh()).state; entry.metadata.model = model; await this.store!.save(entry.metadata);
+  }
+  async getSessionUsage(id: string): Promise<SessionUsage> { const entry = await this.liveOwned(id); return entry.rpc.stats(); }
+  async compactSession(id: string, instructions?: string): Promise<{ tokensBefore: number | null }> {
+    const entry = await this.liveOwned(id);
+    const result = await entry.rpc.compact(instructions);
+    entry.state = (await entry.rpc.refresh()).state; entry.metadata.updatedAt = new Date().toISOString(); await this.persistActivity(entry.metadata);
+    return result;
   }
   async renameSession(id: string, title: string): Promise<void> {
     await this.initializeOwned(); const entry = this.owned.get(id); if (!entry) return this.assertWritable();

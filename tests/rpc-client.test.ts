@@ -50,3 +50,13 @@ test('a missing executable reports a start failure instead of hanging', async ()
   await assert.rejects(client.request({type:'get_state'},false),/Could not start Prime Agent RPC \(ENOENT\)/);
  } finally { await client.close(); }
 });
+
+test('a per-request timeout can be longer than the connection default', async () => {
+  const client = launch(50);
+  try {
+    await assert.rejects(client.request({ type: 'never' }, true), /timed out/);
+    // 'never' gets no reply, so a longer override must still be pending after the default would have fired.
+    const outcome = await Promise.race([client.request({ type: 'never' }, true, 5000).then(() => 'answered', () => 'settled'), new Promise(resolve => setTimeout(() => resolve('pending'), 200))]);
+    assert.equal(outcome, 'pending');
+  } finally { await client.close(); }
+});
