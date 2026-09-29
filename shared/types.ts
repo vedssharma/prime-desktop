@@ -9,6 +9,8 @@ export interface Session {
   ownership?: 'shared' | 'desktop';
   writable?: boolean;
   lifecycle?: 'open' | 'closed';
+  /** Follow-ups the agent reports as queued. Only present when the agent reports it (desktop-owned sessions). */
+  queuedCount?: number;
 }
 export interface Message {
   id: string;

@@ -158,3 +158,14 @@ test('workspace panel shows git changes with a diff and a read-only file tree', 
   await panel.getByRole('button', { name: 'Close workspace panel' }).click();
   await expect(panel).toHaveCount(0);
 });
+
+test('shows the agent-reported queue count for desktop sessions', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).prime.listSessions = async () => [{ id: 's1', title: 'Owned', cwd: '/tmp/project', model: '', status: 'running', createdAt: '', updatedAt: '', ownership: 'desktop', writable: true, lifecycle: 'open', queuedCount: 2 }];
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Owned/ }).click();
+  await expect(page.locator('.header-running')).toContainText('2 queued');
+  await page.getByText('Work & queue status', { exact: true }).click();
+  await expect(page.getByText(/2 queued follow-ups/)).toBeVisible();
+});

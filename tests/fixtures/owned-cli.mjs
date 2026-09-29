@@ -9,14 +9,14 @@ const id = randomUUID(), cwd = value('--cwd'), dir = value('--session-dir');
 mkdirSync(dir, { recursive: true });
 const file = join(dir, id + '.jsonl');
 writeFileSync(file, JSON.stringify({ type: 'session', id, cwd }) + '\n');
-const messages = []; let failState = false; let model = { provider:'fixture', id:'fixture-model', name:'Fixture model' };
+const messages = []; let failState = false; let queued = 0; let model = { provider:'fixture', id:'fixture-model', name:'Fixture model' };
 function event(value) { process.stdout.write(JSON.stringify(value)+'\n'); }
 function reply(command, success, data, error) { process.stdout.write(JSON.stringify({ type:'response',command:command.type,id:command.id,success,data,error })+'\n'); }
 let buffer='';process.stdin.setEncoding('utf8');
 process.stdin.on('data',chunk=>{buffer+=chunk;let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);handle(JSON.parse(line));}});
 function handle(command) {
  if(command.type==='get_state' && failState) return reply(command,false,undefined,'Read failed after admission');
- if(command.type==='get_state') return reply(command,true,{sessionId:id,sessionFile:file,isStreaming:false,isCompacting:false,model});
+ if(command.type==='get_state') return reply(command,true,{sessionId:id,sessionFile:file,isStreaming:false,isCompacting:false,model,sessionActions:{queuedCount:queued}});
  if(command.type==='get_messages')return reply(command,true,{messages});
  if(command.type==='prompt') {
   if(command.message==='ACCEPT_THEN_FAIL_READ') failState=true;
@@ -26,6 +26,8 @@ function handle(command) {
   if(command.message==='WRITE_FIXTURE_FILE') writeFileSync(join(cwd,'owned-proof.txt'),'written by isolated RPC fixture\n');
   // Streaming markers emit agent events the way a real run would, without a model call.
   if(command.message==='STREAM_PARTIAL'){event({type:'agent_start'});event({type:'message_update',message:{role:'assistant',content:'partial reply',timestamp:1}});}
+  if(command.message==='QUEUE_ONE')queued++;
+  if(command.message==='DRAIN_QUEUE')queued=0;
   if(command.message==='FINISH_STREAM'){event({type:'message_end'});event({type:'agent_end'});}
   return reply(command,true);
  }
