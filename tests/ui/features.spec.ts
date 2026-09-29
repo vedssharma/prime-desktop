@@ -102,3 +102,31 @@ test('pins, tags, filters and regroups sessions locally', async ({ page }) => {
   await page.reload();
   await expect(page.locator('.session-group h2').first()).toHaveText('Pinned');
 });
+
+test('command palette opens with the keyboard, filters, and runs actions and session jumps', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('Agent connected', { exact: true })).toBeVisible();
+  await page.keyboard.press('Control+k');
+  const input = page.getByRole('combobox', { name: 'Search commands and sessions' });
+  await expect(input).toBeFocused();
+  await input.fill('second');
+  await expect(page.locator('#palette-list [role=option]').first()).toContainText('Go to: Second task');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.breadcrumb strong')).toHaveText('Second task');
+  await page.keyboard.press('Control+k');
+  await input.fill('pin');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.session-group h2').first()).toHaveText('Pinned');
+  await page.keyboard.press('Control+k');
+  await input.fill('settings');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: /appearance/i }).first()).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await expect(input).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+k');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
