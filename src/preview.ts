@@ -18,6 +18,10 @@ export const previewAPI: PrimeAPI = {
   deleteSession: desktopOnly,
   chooseDirectory: desktopOnly,
   openDirectory: desktopOnly,
+  workspaceList: desktopOnly,
+  workspaceRead: desktopOnly,
+  workspaceChanges: desktopOnly,
+  workspaceDiff: desktopOnly,
   notify: async () => {},
   onNotificationClick: () => () => {},
   saveText: async (name, content) => {

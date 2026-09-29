@@ -56,6 +56,12 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 - Keep separate unsent drafts for each session while the app is open.
 - Remember the last workspace and model selection across launches.
 - Configure appearance, readability, and connection paths without changing CLI state.
+- Export or copy a conversation as Markdown or JSON (session menu or command palette).
+- Syntax-highlighted code blocks and one-line previews of tool output.
+- Native notifications when a session finishes while the app is in the background (Settings → Readability).
+- Pin sessions, add local tags, filter by tag, and group the sidebar by date or workspace. Pins and tags are stored only in this app.
+- Command palette (Cmd/Ctrl+K) for actions and jumping between sessions.
+- Read-only workspace panel: Git changes with diffs, and a file browser with previews. Paths are confined to the session's folder, symlinks are not followed, and Git is run with external diff and fsmonitor hooks disabled. This is a viewer, not a sandbox for agent tools.
 - Preserve saved desktop history when a session closes. Closed sessions are read-only in this first owned-session release; automatic resume and deletion are not offered.
 
 ## Appearance

@@ -23,6 +23,14 @@ test.beforeEach(async ({ page }) => {
       renameSession: async () => {}, deleteSession: async () => {}, setSessionModel: async () => {}, closeOwnedSession: async () => {},
       notify: async (title: string, body: string, id: string) => log('notify', title, body, id),
       onNotificationClick: (listener: (id: string) => void) => { (window as any).__click = listener; return () => {}; },
+      workspaceChanges: async (id: string) => ({ isRepo: true, truncated: false, changes: [{ path: 'src/a.ts', status: 'M', label: 'Modified' }, { path: 'new.txt', status: '??', label: 'Untracked' }] }),
+      workspaceDiff: async (id: string, path: string) => { log('diff', id, path); return { path, truncated: false, diff: 'diff --git a/x b/x\n@@ -1 +1 @@\n-old line\n+new line\n' }; },
+      workspaceList: async (id: string, path?: string) => path === 'src'
+        ? { path, truncated: false, entries: [{ name: 'a.ts', type: 'file', size: 20 }] }
+        : { path: '', truncated: false, entries: [{ name: 'src', type: 'dir', size: 0 }, { name: 'logo.png', type: 'file', size: 9 }, { name: 'link', type: 'link', size: 0 }] },
+      workspaceRead: async (id: string, path: string) => path === 'logo.png'
+        ? { path, size: 9, binary: true, truncated: false, content: '' }
+        : { path, size: 20, binary: false, truncated: false, content: 'export const a = 1;\n' },
       copyText: async (text: string) => log('copy', text),
       saveText: async (name: string, content: string) => { log('save', name, content); return true; },
       chooseDirectory: async () => '/tmp/chosen', openDirectory: async (path: string) => log('open', path),
@@ -129,4 +137,24 @@ test('command palette opens with the keyboard, filters, and runs actions and ses
   await page.keyboard.press('Control+k');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('workspace panel shows git changes with a diff and a read-only file tree', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Explore the workspace/ }).click();
+  await page.getByRole('button', { name: 'Workspace files and changes' }).click();
+  const panel = page.getByRole('complementary', { name: 'Workspace' });
+  await expect(panel.getByRole('tab', { name: /Changes \(2\)/ })).toBeVisible();
+  await panel.getByRole('button', { name: /src\/a\.ts/ }).click();
+  await expect(panel.locator('.diff-line.add')).toHaveText('+new line');
+  await expect(panel.locator('.diff-line.del')).toHaveText('-old line');
+  await panel.getByRole('tab', { name: 'Files' }).click();
+  await expect(panel.getByRole('button', { name: /link/ })).toBeDisabled();
+  await panel.getByRole('button', { name: /logo\.png/ }).click();
+  await expect(panel.getByText('Binary file')).toBeVisible();
+  await panel.getByRole('button', { name: 'src', exact: true }).click();
+  await panel.getByRole('button', { name: /a\.ts/ }).click();
+  await expect(panel.locator('.file-view .tok-keyword')).toHaveText(['export', 'const']);
+  await panel.getByRole('button', { name: 'Close workspace panel' }).click();
+  await expect(panel).toHaveCount(0);
 });

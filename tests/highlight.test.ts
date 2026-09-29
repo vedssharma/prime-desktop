@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { languageFor, tokenize } from '../src/highlight.js';
+import { languageFor, languageForFile, tokenize } from '../src/highlight.js';
 
 const kinds = (code: string, lang: string) => tokenize(code, lang).filter(t => t.kind !== 'plain').map(t => `${t.kind}:${t.text}`);
 
@@ -27,4 +27,11 @@ test('tokens always reassemble to the exact input, including unterminated string
 
 test('very large blocks are left plain to bound rendering cost', () => {
   assert.equal(tokenize('const a = 1;'.repeat(5000), 'js').length, 1);
+});
+
+test('file names map to languages by extension', () => {
+  assert.equal(languageForFile('src/App.tsx'), 'ts');
+  assert.equal(languageForFile('run.SH'), 'sh');
+  assert.equal(languageForFile('README'), undefined);
+  assert.equal(languageForFile('data.unknown'), undefined);
 });

@@ -59,3 +59,9 @@ export function tokenize(code: string, language: string): Token[] {
   push('plain', code.slice(last));
   return tokens;
 }
+
+/** Language for a file name by extension, using the same aliases as fenced code. */
+export function languageForFile(name: string): string | undefined {
+  const extension = /\.([\w+#-]+)$/.exec(name)?.[1]?.toLowerCase();
+  return extension ? languageFor(`language-${extension}`) : undefined;
+}

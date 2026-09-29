@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   deleteSession: (id: string) => invoke('deleteSession', id),
   chooseDirectory: () => invoke('chooseDirectory'),
   openDirectory: (path: string) => invoke('openDirectory', path),
+  workspaceList: (id: string, path?: string) => invoke('workspaceList', id, path),
+  workspaceRead: (id: string, path: string) => invoke('workspaceRead', id, path),
+  workspaceChanges: (id: string) => invoke('workspaceChanges', id),
+  workspaceDiff: (id: string, path: string) => invoke('workspaceDiff', id, path),
   notify: (title: string, body: string, sessionId?: string) => invoke('notify', title, body, sessionId),
   onNotificationClick: (listener: (sessionId: string) => void) => {
     const wrapped = (_event: unknown, sessionId: unknown) => { if (typeof sessionId === 'string') listener(sessionId); };
