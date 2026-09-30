@@ -626,3 +626,6 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 .attachment-error { padding: 6px 14px 0; font-size: 12px; color: var(--text); }
 .message-images { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .message-images img { max-width: min(100%, 260px); max-height: 220px; object-fit: contain; border-radius: 8px; }
+
+.compaction-instructions { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; }
+.compaction-instructions textarea { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; resize: vertical; color: var(--text); background: var(--surface); font: inherit; }

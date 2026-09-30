@@ -137,3 +137,19 @@ test('an owned session shows usage and compacts on demand; shared sessions do no
   await page.getByText('Work & queue status').click();
   await expect(page.getByRole('button', { name: 'Compact context' })).toHaveCount(0);
 });
+
+
+test('custom compaction instructions are trimmed, bounded and sent only on request', async ({page}) => {
+  await open(page);await select(page,'Owned session');
+  await page.getByText('Work & queue status').click();
+  const instructions=page.getByRole('textbox',{name:'Compaction instructions (optional)'});
+  await instructions.fill('  Preserve file paths and test failures.  ');
+  expect(await page.evaluate(()=>(window as any).__calls.filter((call:any[])=>call[0]==='compact'))).toEqual([]);
+  await page.getByRole('button',{name:'Compact context'}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as any).__calls.filter((call:any[])=>call[0]==='compact'))).toEqual([['compact','owned','Preserve file paths and test failures.']]);
+  await instructions.fill('é'.repeat(8193));
+  await expect(page.getByText('Compaction instructions must fit within 16 KiB.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Compact context'})).toBeDisabled();
+  await select(page,'Shared session');
+  await expect(instructions).toHaveCount(0);
+});

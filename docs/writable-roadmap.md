@@ -46,7 +46,7 @@ Implemented for desktop-owned sessions (RPC per upstream `docs/rpc.md`, v0.9.6):
   "not yet estimated", never as zero.
 - **Compaction:** `compact` runs only while the session is idle (no streaming,
   compaction, unfinished or queued work), with a 5-minute timeout and optional
-  custom instructions (the UI currently sends none). It rewrites the agent's working
+  custom instructions supplied through the usage panel (up to 16 KiB). It rewrites the agent's working
   context inside the same persistent session and keeps the identity. An uncertain
   outcome closes the pipe and is never resent.
 
