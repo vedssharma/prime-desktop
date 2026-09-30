@@ -120,9 +120,16 @@ auth and is not this desktop policy.
 `electron/owned-rpc.ts` exposes only:
 
 - `get_state`, `get_messages`, and `get_available_models`;
-- plain-text `prompt` (always declaring `followUp` to handle idle-to-running races);
+- `prompt` with text and validated raster images (always declaring `followUp` to handle idle-to-running races);
 - `abort`; and
-- idle-only `set_model`.
+- idle-only `set_model`; and
+- identity-checked `get_session_stats` and idle-only `compact`.
+
+Image prompts require explicit image input support in the current model metadata.
+Only PNG/JPEG/WebP base64 payloads are accepted, with at most four images and 384 KiB
+combined decoded bytes. The complete UTF-8 JSON command including UUID and LF must
+fit the 1 MiB input frame limit. The renderer picker additionally checks decoding
+and dimensions. No file paths, remote images, or SVG payloads are passed as prompts.
 
 Leading slash commands are rejected. No navigation, resume, fork, clone, import,
 raw command API, extension UI approval, or schedule/heartbeat mutation is exposed.

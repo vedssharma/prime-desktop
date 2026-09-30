@@ -1,5 +1,5 @@
 import { _electron as electron, expect } from '@playwright/test';
-import { mkdtemp, copyFile, chmod, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, copyFile, chmod, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 const dir=await mkdtemp(path.join(tmpdir(),'dock-owned-e2e-'));
@@ -20,7 +20,19 @@ try {
  expect(await readFile(path.join(dir,'owned-proof.txt'),'utf8')).toContain('isolated RPC fixture');
  const sessions=await page.evaluate(()=>window.prime.listSessions());const owned=sessions.find(s=>s.ownership==='desktop');expect(owned.writable).toBe(true);
  await expect(page.evaluate(()=>window.prime.sendMessage('unrelated-shared-session','no'))).rejects.toThrow(/Read-only compatibility/);
+ const image={type:'image',mimeType:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='};
+ const imageFile=path.join(dir,'example.png');await writeFile(imageFile,Buffer.from(image.data,'base64'));
+ await page.getByLabel('Choose image attachments').setInputFiles(imageFile);
+ await expect(page.getByRole('button',{name:'Remove example.png'})).toBeVisible();
+ await page.getByRole('button',{name:'Send message',exact:true}).click();
+ await expect(page.locator('.message-images img')).toHaveCount(1);
+ expect((await page.evaluate(id=>window.prime.getMessages(id),owned.id)).at(-1).images).toEqual([image]);
+ await expect(page.evaluate(image=>window.prime.sendMessage('unrelated-shared-session','no',[image]),image)).rejects.toThrow(/Read-only compatibility/);
+ await expect(page.evaluate(image=>window.prime.sendMessage('bad','no',[{...image,data:'invalid'}]),image)).rejects.toThrow(/image data/i);
+ await page.evaluate(id=>window.prime.setSessionModel(id,'fixture/text-only'),owned.id);
+ await expect(page.evaluate(({id,image})=>window.prime.sendMessage(id,'no',[image]),{id:owned.id,image})).rejects.toThrow(/image support/);
  await page.evaluate(id=>window.prime.closeOwnedSession(id),owned.id);
+ expect((await page.evaluate(id=>window.prime.getMessages(id),owned.id))[0].images).toEqual([image]);
  await expect.poll(async()=> (await page.evaluate(()=>window.prime.listSessions())).find(s=>s.id===owned.id)?.writable).toBe(false);
- console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, close to saved history. No LLM request made.');
+ console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history. No LLM request made.');
 }catch(error){console.error(error);throw error;}finally{await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});}).catch(()=>{});try{const page=await app.firstWindow();await page.evaluate(async()=>{for(const session of await window.prime.listSessions())if(session.ownership==='desktop')await window.prime.closeOwnedSession(session.id);});}catch{}await app.close();await rm(dir,{recursive:true,force:true});}

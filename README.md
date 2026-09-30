@@ -49,7 +49,7 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 ## What it does
 
 - Create desktop-owned sessions in trusted workspaces using your existing CLI credentials.
-- Send prompts/follow-ups, view streamed output, stop work, and change the model when idle.
+- Send prompts/follow-ups, attach images, view streamed output, stop work, and change the model when idle.
 - Browse and search existing Prime Agent sessions without changing them.
 - Read conversations, Markdown responses, and tool output.
 - Copy responses through a validated native clipboard bridge.
@@ -82,6 +82,21 @@ These are desktop-only settings and do not change the CLI's theme.
 Drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. Only the new-session workspace path, model choice, and appearance settings are stored locally.
 
 This workflow is enabled only for open desktop-owned sessions on the verified CLI version; shared and closed sessions are read-only. During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
+
+## Image attachments
+
+Use **Attach images** in a writable desktop-owned session or before creating one.
+PNG, JPEG, and WebP are supported: up to four images, totaling 384 KiB, at most
+16 megapixels and 8192 pixels on each side. Resize larger files before attaching.
+The selected model must report image support; new sessions check the actual CLI
+model before submitting the first prompt. Image-only prompts and queued follow-ups
+are supported. Remove thumbnails to discard attachments before sending.
+
+Unsent images stay in each draft's memory and disappear on reload. Accepted images
+become part of the CLI transcript and appear in saved history and conversation
+exports. Failed submissions keep the draft; late admission never clears newer edits.
+The complete message and images must fit the 1 MiB RPC request limit. Shared and
+closed sessions remain read-only. Remote Markdown images remain external links.
 
 ## Architecture
 
@@ -151,8 +166,9 @@ saved default may change too. Shared sessions cannot be switched from this app.
   A save is refused if the file changed on disk since you opened it (for example, the agent wrote to it),
   and the previous bytes are backed up under the app's `workspace-backups` folder (newest 200 kept).
   The check and write are not one atomic step. Creating, renaming and deleting files is not offered.
-- The queue shows the agent-reported follow-up count. Queued text, reordering and cancellation, fork,
-  compaction, usage and attachments still need documented RPC support and are future steps.
+- The queue shows the agent-reported follow-up count. Queued text, reordering and cancellation
+  need upstream IDs/versioning. Fork and resume still need a separate ownership design.
+  Usage, compaction and image attachments are implemented.
 - Resuming closed desktop sessions remains disabled by design (see `docs/owned-rpc-design.md`).
 
 `npm run test:electron` uses disposable simulated daemons/RPC processes, including a
