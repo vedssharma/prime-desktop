@@ -81,5 +81,8 @@ Additional history support:
   beside transcripts with a `.snapshot` extension for persistent parent linkage; they
   are not desktop session records. Source history is never edited.
 
-- **Queue editing:** unchanged; the count is shown, but message text and cancellation
-  are not available without IDs/versioning.
+- **Queue editing:** blocked on upstream RPC support for stable message IDs and
+  atomic queue revisions. The separate daemon index/text mutation API cannot satisfy
+  the owned-session boundary. Native probes verify RPC queue reads are unavailable
+  and unrelated peers cannot read or clear the owned queue. See
+  [the queue contract](queue-editing-contract.md) for source evidence and acceptance cases.

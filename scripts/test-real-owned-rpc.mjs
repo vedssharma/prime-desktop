@@ -99,13 +99,15 @@ try {
   report.clientOwned = true;
   report.peerDenials = [];
   for (const activeSessionId of [descriptor.rootActiveSessionId, state.sessionId]) {
-    for (const type of ['get_state', 'new_session']) {
+    for (const type of ['get_state', 'new_session', 'get_queue', 'clear_queue']) {
       const result = await peerChannel.request({ type, activeSessionId });
       assert.equal(result.success, false, JSON.stringify(result));
       assert.match(result.error, /Unknown active session/);
       report.peerDenials.push({ type, selector: activeSessionId === state.sessionId ? 'persistent' : 'active', error: result.error });
     }
   }
+  await assert.rejects(rpcChannel.request({type:'get_queue'}),/No response to get_queue/);
+  report.ownedRpcQueueUnavailable = true;
   const unchanged = await rpcChannel.request({ type: 'get_state' });
   assert.equal(unchanged.data.sessionId, state.sessionId);
   report.identityUnchanged = true;

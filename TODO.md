@@ -21,7 +21,7 @@ binary release is uploaded automatically. See `docs/daemon-safety.md` and
 
 ## Owned-session follow-up
 
-The next roadmap added a source-verified owned RPC boundary, prompts/follow-ups, stop, idle model selection, explicit workspace trust, local history, quit confirmation, and guided provider login/model discovery. See `docs/owned-rpc-design.md` and `docs/writable-roadmap.md`. Image attachments, usage/custom compaction, and explicit closed-history fork/resume are implemented with browser/backend/native coverage. This does not fix the shared daemon protocol or create a filesystem sandbox.
+The next roadmap added a source-verified owned RPC boundary, prompts/follow-ups, stop, idle model selection, explicit workspace trust, local history, quit confirmation, and guided provider login/model discovery. See `docs/owned-rpc-design.md` and `docs/writable-roadmap.md`. Image attachments, usage/custom compaction, and explicit closed-history fork/resume (including earlier-message snapshots) are implemented with browser/backend/native coverage. This does not fix the shared daemon protocol or create a filesystem sandbox.
 
 ## Original review validation
 
@@ -269,7 +269,7 @@ when credentials/provider configuration changes (`electron/prime.ts:159–174`).
 
 ### [ ] 13. Expose queue state and per-session pending operations
 
-**Implementation:** Per-session pending operations implemented with duplicate-request guards; unrelated sessions remain usable. Queue status explicitly distinguishes unavailable authority from an empty queue. Queue viewing/edit/cancel remains BLOCKED by the same upstream identity race as item2; no unsafe get_queue/mutate_queued_message calls added.
+**Implementation:** Per-session pending operations implemented with duplicate-request guards; unrelated sessions remain usable. Queue status explicitly distinguishes unavailable authority from an empty queue. Shared queue viewing/edit/cancel remains BLOCKED by the same upstream identity race as item2. Owned RPC lacks individual queue operations and stable IDs/revisions; native peer-denial probes and the required upstream contract are recorded in docs/queue-editing-contract.md. No daemon queue mutation is enabled.
 
 
 The UI acknowledges admission but does not show the authoritative queued prompts,
