@@ -2,6 +2,7 @@ import { mkdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { isRecord } from './bounded-io.js';
 import { RpcClient, type RpcLaunch } from './rpc-client.js';
+import { promptCommand, supportsImages, type ImageAttachment } from './attachments.js';
 
 type RecordValue = Record<string, any>;
 export interface OwnedRpcLaunch {
@@ -152,14 +153,13 @@ export class OwnedRpcSession {
     }
   }
 
-  async send(message: string): Promise<void> {
-    if (typeof message !== 'string' || !message.trim()) throw Error('Enter a message.');
-    if (message.trimStart().startsWith('/')) throw Error('Slash commands are not supported in desktop-owned sessions.');
-    if (Buffer.byteLength(message) > 512 * 1024) throw Error('Message exceeds the 512 KiB limit.');
-    await this.getState();
+  async send(message: string, images?: ImageAttachment[]): Promise<void> {
+    const command = promptCommand(message, images);
+    const state = await this.getState();
+    if (command.images?.length && !supportsImages(state.model)) throw Error('The selected model does not report image support. Choose an image-capable model before sending.');
     // Always declare queue behavior: the worker can start between the read and
     // prompt admission. This flag is also valid while the worker is idle.
-    await this.mutate({ type: 'prompt', message, streamingBehavior: 'followUp' });
+    await this.mutate(command);
   }
 
   async abort(): Promise<void> {

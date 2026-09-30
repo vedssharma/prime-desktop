@@ -9,7 +9,8 @@ const id = randomUUID(), cwd = value('--cwd'), dir = value('--session-dir');
 mkdirSync(dir, { recursive: true });
 const file = join(dir, id + '.jsonl');
 writeFileSync(file, JSON.stringify({ type: 'session', id, cwd }) + '\n');
-const messages = []; let failState = false; let queued = 0; let compacted = false; let model = { provider:'fixture', id:'fixture-model', name:'Fixture model' };
+const selected = process.argv.includes('--model') ? value('--model').split('/').slice(1).join('/') : 'fixture-model';
+const messages = []; let failState = false; let queued = 0; let compacted = false; let model = { provider:'fixture', id:selected, name:'Fixture model', input:selected==='text-only'?['text']:['text','image'] };
 function event(value) { process.stdout.write(JSON.stringify(value)+'\n'); }
 function reply(command, success, data, error) { process.stdout.write(JSON.stringify({ type:'response',command:command.type,id:command.id,success,data,error })+'\n'); }
 let buffer='';process.stdin.setEncoding('utf8');
@@ -20,7 +21,7 @@ function handle(command) {
  if(command.type==='get_messages')return reply(command,true,{messages});
  if(command.type==='prompt') {
   if(command.message==='ACCEPT_THEN_FAIL_READ') failState=true;
-  const msg={role:'user',content:command.message,timestamp:Date.now()};messages.push(msg);
+  const msg={role:'user',content: command.images?.length ? [{type:'text',text:command.message}, ...command.images] : command.message,timestamp:Date.now()};messages.push(msg);
   appendFileSync(file,JSON.stringify({type:'message',id:randomUUID(),parentId:null,message:msg})+'\n');
   // This explicit fixture instruction is not a model call or arbitrary code execution.
   if(command.message==='WRITE_FIXTURE_FILE') writeFileSync(join(cwd,'owned-proof.txt'),'written by isolated RPC fixture\n');
@@ -31,7 +32,7 @@ function handle(command) {
   if(command.message==='FINISH_STREAM'){event({type:'message_end'});event({type:'agent_end'});}
   return reply(command,true);
  }
- if(command.type==='set_model'){model={provider:command.provider,id:command.modelId};return reply(command,true,model);}
+ if(command.type==='set_model'){model={provider:command.provider,id:command.modelId,input:command.modelId==='text-only'?['text']:['text','image']};return reply(command,true,model);}
  if(command.type==='get_available_models')return reply(command,true,{models:[model]});
  if(command.type==='abort')return reply(command,true);
  if(command.type==='get_session_stats')return reply(command,true,{sessionId:id,userMessages:messages.length,assistantMessages:0,toolCalls:0,tokens:{input:10,output:5,cacheRead:0,cacheWrite:0,total:15},cost:0.001,contextUsage:{tokens:compacted?null:15,contextWindow:1000,percent:compacted?null:1.5}});

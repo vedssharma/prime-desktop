@@ -100,7 +100,7 @@ async function ownedFixture(run:(service:PrimeService,dir:string)=>Promise<void>
 test('owned creation rejects slash or blank prompts and non-directory workspaces before launching', async () => {
  await ownedFixture(async (service,dir)=>{
   const file=join(dir,'file.txt');await writeFile(file,'');
-  for(const prompt of ['   ','/new','  /resume x']) await assert.rejects(service.createSession({cwd:dir,prompt,allowFileChanges:true}),/plain-language prompt/,prompt);
+  for(const prompt of ['   ','/new','  /resume x']) await assert.rejects(service.createSession({cwd:dir,prompt,allowFileChanges:true}),/message or attach|Slash commands/,prompt);
   for(const cwd of ['relative/dir',file]) await assert.rejects(service.createSession({cwd,prompt:'Hello',allowFileChanges:true}),/absolute workspace/,cwd);
   await assert.rejects(service.createSession({cwd:dir,prompt:'Hello',allowFileChanges:'yes' as any}),/Confirm/);
   assert.deepEqual(await service.listSessions(),[]);
@@ -168,4 +168,24 @@ test('desktop-owned usage and compaction go through the owned pipe only', async 
   await assert.rejects(service.compactSession(session.id),/closed/);
   assert(daemon.commands.every(command=>command.type==='list'));
  }finally{await service.close();await daemon.close();await rm(dir,{recursive:true,force:true});}
+});
+
+
+test('images travel through the owned subprocess and saved history, with model and shared-session guards', async () => {
+ await ownedFixture(async (service, dir) => {
+  const image = {type:'image' as const,mimeType:'image/png' as const,data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='};
+  const session = await service.createSession({cwd:dir,prompt:'',images:[image],allowFileChanges:true});
+  assert.equal(session.supportsImages,true);
+  assert.equal(session.title,'Image conversation');
+  assert.deepEqual((await service.getMessages(session.id))[0].images,[image]);
+  await service.sendMessage(session.id,'Follow-up',[image]);
+  assert.deepEqual((await service.getMessages(session.id))[1].images,[image]);
+  await service.setSessionModel(session.id,'fixture/text-only');
+  await assert.rejects(service.sendMessage(session.id,'No',[image]),/image support/);
+  await assert.rejects(service.sendMessage('shared','No',[image]),/Read-only compatibility/);
+  await service.closeOwnedSession(session.id);
+  assert.deepEqual((await service.getMessages(session.id))[0].images,[image]);
+  await assert.rejects(service.createSession({cwd:dir,prompt:'No',images:[image],model:'fixture/text-only',allowFileChanges:true}),/image support/);
+  assert.equal(await service.hasOpenOwnedSessions(),false);
+ });
 });

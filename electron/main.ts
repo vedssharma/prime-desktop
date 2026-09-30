@@ -4,6 +4,7 @@ import path from 'node:path';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { validateConfig, text, directory } from './ipc-validation.js';
 import { PrimeService } from './prime.js';
+import { promptCommand } from './attachments.js';
 import { listWorkspace, readWorkspaceFile, saveWorkspaceFile, workspaceChanges, workspaceDiff } from './workspace.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,14 +49,18 @@ function registerIPC() {
     if (configuring) throw new Error('Wait for connection settings to finish changing.');
     if (!value || typeof value !== 'object') throw new Error('Invalid session');
     const input = value as Record<string, unknown>;
+    const command = promptCommand(input.prompt, input.images);
     const cwd = await directory(input.cwd);
     if (configuring) throw new Error('Connection settings changed before session creation. Try again.');
-    return service.createSession({ prompt: text(input.prompt, 'prompt'), cwd,
-      model: input.model === undefined ? undefined : text(input.model, 'model', 512), allowFileChanges: input.allowFileChanges === true });
+    return service.createSession({ prompt: command.message, cwd,
+      model: input.model === undefined ? undefined : text(input.model, 'model', 512), allowFileChanges: input.allowFileChanges === true, images: command.images });
   });
   handle('setSessionModel', (id, model) => service.setSessionModel(text(id, 'session ID', 4096), text(model, 'model', 512)));
   handle('closeOwnedSession', id => service.closeOwnedSession(text(id, 'session ID', 4096)));
-  handle('sendMessage', (id, message) => service.sendMessage(text(id, 'session ID', 4096), text(message, 'message')));
+  handle('sendMessage', (id, message, images) => {
+    const command = promptCommand(message, images);
+    return service.sendMessage(text(id, 'session ID', 4096), command.message, command.images);
+  });
   handle('interruptSession', (id) => service.interruptSession(text(id, 'session ID', 4096)));
   handle('getSessionUsage', (id) => service.getSessionUsage(text(id, 'session ID', 4096)));
   handle('compactSession', (id, instructions) => service.compactSession(text(id, 'session ID', 4096), instructions === undefined || instructions === '' ? undefined : text(instructions, 'instructions', 16 * 1024)));

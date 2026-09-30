@@ -266,3 +266,27 @@ test('compaction needs an idle session, uses a long timeout, and never resends a
     assert.equal(session.alive, false);
   });
 });
+
+test('image prompts require current model capability, preserve follow-up behavior and never dispatch invalid payloads', async () => {
+  const image = {type: 'image' as const, mimeType: 'image/png' as const, data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='};
+  await fixture(async (session, rpc) => {
+    for (const model of [undefined, {provider:'p',id:'m',input:['text']}]) {
+      rpc.state.model = model;
+      await assert.rejects(session.send('look', [image]), /image support/);
+    }
+    assert.ok(!rpc.commands.some(({command}) => command.type === 'prompt'));
+    rpc.state.model = {provider:'p',id:'m',input:['text','image']};
+    await session.send('', [image]);
+    assert.deepEqual(rpc.commands.at(-1)?.command, {type:'prompt',message:'',streamingBehavior:'followUp',images:[image]});
+    rpc.state.isStreaming = true;
+    await session.send('follow-up', [image]);
+    assert.equal(rpc.commands.at(-1)?.command.streamingBehavior, 'followUp');
+    const before = rpc.commands.length;
+    await assert.rejects(session.send('bad', [{...image, data:'invalid'}]));
+    await assert.rejects(session.send('\x01'.repeat(200000)), /1 MiB/);
+    assert.equal(rpc.commands.length, before);
+    rpc.state.sessionId = 'other';
+    await assert.rejects(session.send('no', [image]), /identity changed/);
+    assert.equal(rpc.commands.filter(({command}) => command.type === 'prompt').length, 2);
+  });
+});

@@ -1,3 +1,5 @@
+import type { ImageAttachment } from '../electron/attachments';
+export type { ImageAttachment } from '../electron/attachments';
 export interface Session {
   id: string;
   title: string;
@@ -11,6 +13,7 @@ export interface Session {
   lifecycle?: 'open' | 'closed';
   /** Follow-ups the agent reports as queued. Only present when the agent reports it (desktop-owned sessions). */
   queuedCount?: number;
+  supportsImages?: boolean;
 }
 export interface Message {
   id: string;
@@ -18,6 +21,7 @@ export interface Message {
   content: string;
   timestamp?: string;
   toolName?: string;
+  images?: ImageAttachment[];
 }
 export interface SessionUsage {
   userMessages: number; assistantMessages: number; toolCalls: number;
@@ -37,7 +41,7 @@ export interface ConnectionStatus {
   error?: string;
   home: string;
 }
-export interface CreateSessionInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; }
+export interface CreateSessionInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[]; }
 export interface ConnectionConfig { executable: string; socketPath: string; }
 export interface WorkspaceEntry { name: string; type: 'file' | 'dir' | 'link'; size: number }
 export interface WorkspaceListing { path: string; entries: WorkspaceEntry[]; truncated: boolean }
@@ -57,7 +61,7 @@ export interface PrimeAPI {
   setSessionModel(id: string, model: string): Promise<void>;
   closeOwnedSession(id: string): Promise<void>;
   createSession(input: CreateSessionInput): Promise<Session>;
-  sendMessage(id: string, text: string): Promise<void>;
+  sendMessage(id: string, text: string, images?: ImageAttachment[]): Promise<void>;
   interruptSession(id: string): Promise<void>;
   getSessionUsage(id: string): Promise<SessionUsage>;
   compactSession(id: string, instructions?: string): Promise<{ tokensBefore: number | null }>;

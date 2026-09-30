@@ -18,6 +18,9 @@ export function conversationToMarkdown(session: Pick<Session, 'title' | 'cwd' | 
     lines.push(`## ${label}${message.timestamp ? ` · ${message.timestamp}` : ''}`, '');
     if (message.role === 'tool') { const marks = fence(message.content); lines.push(marks, message.content || 'No output', marks); }
     else lines.push(message.content);
+    for (const [index, image] of (message.images ?? []).entries()) {
+      lines.push('', `![Image attachment ${index + 1}](data:${image.mimeType};base64,${image.data})`);
+    }
     lines.push('');
   }
   return lines.join('\n');

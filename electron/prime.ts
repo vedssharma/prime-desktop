@@ -9,11 +9,12 @@ import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import { DaemonTransport, type WireRecord } from './transport.js';
 import { readBoundedFile, isRecord } from './bounded-io.js';
+import { promptCommand, validateImages, supportsImages, type ImageAttachment } from './attachments.js';
 
 const exec = promisify(execFile);
-interface Session { queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
-interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; }
-interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; }
+interface Session { supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
+interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; images?: ImageAttachment[]; }
+interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[]; }
 export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; }
 
 function text(value: unknown): string { return typeof value === 'string' ? value : ''; }
@@ -45,8 +46,13 @@ export function normalizeMessages(messages: WireRecord[]): Message[] {
     if (['branchSummary', 'compactionSummary'].includes(message.role)) content = `${message.role === 'branchSummary' ? 'Branch summary' : 'Context summary'}\n\n${text(message.summary)}`;
     if (message.role === 'bashExecution') content = `$ ${text(message.command)}\n${text(message.output)}`;
     if (message.errorMessage) content += `${content ? '\n\n' : ''}Error: ${message.errorMessage}`;
-    if (blocks.some(block => block.type === 'image')) content += '\n[Image attachment]';
-    if (content.trim()) output.push({ id, role, content, timestamp, ...(message.toolName ? { toolName: text(message.toolName) } : {}) });
+    const images: ImageAttachment[] = [];
+    for (const block of blocks.filter(block => block.type === 'image')) {
+      try { validateImages([...images, block]); images.push(validateImages([block])[0]); }
+      catch { content += '\n[Image attachment unavailable: unsupported type or size]'; }
+      if (images.length === 4) break;
+    }
+    if (content.trim() || images.length) output.push({ id, role, content, timestamp, ...(images.length ? { images } : {}), ...(message.toolName ? { toolName: text(message.toolName) } : {}) });
     blocks.filter(block => block.type === 'toolCall').forEach((block, i) => {
       output.push({ id: `${id}-call-${i}`, role: 'tool', toolName: text(block.name), timestamp, content: JSON.stringify(block.arguments ?? {}, null, 2) });
     });
@@ -138,6 +144,7 @@ export class PrimeService {
     return { ...entry.metadata, model: entry.state?.model ? [entry.state.model.provider, entry.state.model.id].filter(Boolean).join('/') : entry.metadata.model,
       status: entry.error ? 'error' : entry.state?.isStreaming || entry.state?.isCompacting || entry.state?.unfinishedActionCount > 0 ? 'running' : 'idle',
       ...(Number.isSafeInteger(entry.state?.sessionActions?.queuedCount) && entry.state!.sessionActions.queuedCount >= 0 ? { queuedCount: entry.state!.sessionActions.queuedCount } : {}),
+      ...(entry.state?.model ? { supportsImages: supportsImages(entry.state.model) } : {}),
       ownership: 'desktop', writable: !!entry.rpc?.alive && !this.closing, lifecycle: entry.rpc?.alive ? 'open' : 'closed' };
   }
   private async liveOwned(id: string) {
@@ -263,7 +270,8 @@ export class PrimeService {
     const task = (async () => {
       if (!(await this.ownedSupport()).allowed) return this.assertWritable();
       if (input.allowFileChanges !== true) throw Error('Confirm that the agent may run tools and change files before starting.');
-      if (!input.prompt.trim() || input.prompt.trimStart().startsWith('/')) throw Error('Enter a plain-language prompt. Slash commands are not available for desktop-owned sessions.');
+      const command = promptCommand(input.prompt, input.images);
+      input = { ...input, images: command.images };
       if (!isAbsolute(input.cwd) || !(await stat(input.cwd)).isDirectory()) throw Error('Choose an existing absolute workspace.');
       if (this.closing) throw Error('Desktop sessions are closing.');
       return this.createOwned(input);
@@ -276,10 +284,12 @@ export class PrimeService {
     if (this.closing) throw Error('Desktop sessions are closing.');
     const rpc = await OwnedRpcSession.launch({ executable: await this.cli(), cwd: input.cwd, sessionDir: this.store!.transcripts, model: input.model, socketPath: this.transport.socketPath });
     const now = new Date().toISOString();
-    const metadata: OwnedMetadata = { id: `desktop-${randomUUID()}`, sessionId: rpc.id, sessionFile: rpc.sessionFile, cwd: input.cwd, title: input.prompt.replace(/\s+/g, ' ').trim().slice(0, 100), model: input.model ?? '', createdAt: now, updatedAt: now };
+    const metadata: OwnedMetadata = { id: `desktop-${randomUUID()}`, sessionId: rpc.id, sessionFile: rpc.sessionFile, cwd: input.cwd, title: input.prompt.replace(/\s+/g, ' ').trim().slice(0, 100) || 'Image conversation', model: input.model ?? '', createdAt: now, updatedAt: now };
     const entry = { metadata, rpc, state: {} as WireRecord, error: undefined as string | undefined, streaming: undefined as WireRecord | undefined };
     try {
       if (this.closing) throw Error('Desktop closed before the session started.');
+      entry.state = await rpc.getState();
+      if (input.images?.length && !supportsImages(entry.state.model)) throw Error('The selected model does not report image support. Choose an image-capable model before sending.');
       await this.store!.save(metadata); this.owned.set(metadata.id, entry);
       rpc.onEvent(event => {
         if (event.type === 'agent_start') entry.state.isStreaming = true;
@@ -291,7 +301,7 @@ export class PrimeService {
         if (event.type === 'agent_end') void this.persistActivity(metadata);
       });
       if (this.closing) throw Error('Desktop closed before prompt admission.');
-      entry.state.isStreaming = true; await rpc.send(input.prompt);
+      entry.state.isStreaming = true; await rpc.send(input.prompt, input.images);
       return this.ownedSession(entry);
     } catch (error) {
       entry.error = error instanceof Error ? error.message : String(error);
@@ -300,8 +310,8 @@ export class PrimeService {
       throw Error(`Desktop session ${metadata.id} could not finish starting: ${entry.error}. Check its history before retrying.`);
     }
   }
-  async sendMessage(id: string, message: string): Promise<void> {
-    const entry = await this.liveOwned(id); await entry.rpc.send(message); entry.metadata.updatedAt = new Date().toISOString();
+  async sendMessage(id: string, message: string, images?: ImageAttachment[]): Promise<void> {
+    const entry = await this.liveOwned(id); await entry.rpc.send(message, images); entry.metadata.updatedAt = new Date().toISOString();
     // Admission is success even if later state/transcript refresh fails. UI reads separately.
     await this.persistActivity(entry.metadata);
   }
