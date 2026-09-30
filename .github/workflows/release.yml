@@ -38,7 +38,7 @@ jobs:
           PRIME_DESKTOP_EXECUTABLE: release/mac-arm64/Session Dock.app/Contents/MacOS/Session Dock
       - name: Verify signed app
         if: ${{ inputs.signed }}
-        run: codesign --verify --deep --strict "release/mac-arm64/Session Dock.app" && spctl --assess --type execute "release/mac-arm64/Session Dock.app"
+        run: node scripts/verify-signed-release.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ inputs.signed && 'signed' || 'unsigned' }}
@@ -46,6 +46,7 @@ jobs:
             release/*.dmg
             release/*.zip
             release/SHA256SUMS
+            release/SIGNING_VERIFICATION.json
   linux:
     if: ${{ !inputs.signed }}
     runs-on: ubuntu-latest

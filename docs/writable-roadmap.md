@@ -71,10 +71,18 @@ Implemented for desktop-owned sessions (RPC per upstream `docs/rpc.md`, v0.9.6):
   parent history, exact resume identity and rejection of concurrent resume. Native
   Electron fixture tests cover the dialogs, IPC and independent follow-ups.
 
-Still open, each needing its own design and native integration coverage:
+Additional history support:
 
-- **Fork from an earlier message:** selecting individual entry IDs and safely making
-  a partial-history fork is not implemented. Current startup fork copies saved history.
+- **Fork from an earlier message:** the fork dialog selects a user/assistant message
+  from the current saved branch (version 3). A private snapshot includes its ancestry
+  through that message; startup fork copies the snapshot into a new owned identity.
+  Later messages and alternate branches are excluded. Duplicate IDs, cycles, missing
+  parents, non-message targets and assistant tool calls are rejected. Snapshots remain
+  beside transcripts with a `.snapshot` extension for persistent parent linkage; they
+  are not desktop session records. Source history is never edited.
 
-- **Queue editing:** unchanged; the count is shown, but message text and cancellation
-  are not available without IDs/versioning.
+- **Queue editing:** blocked on upstream RPC support for stable message IDs and
+  atomic queue revisions. The separate daemon index/text mutation API cannot satisfy
+  the owned-session boundary. Native probes verify RPC queue reads are unavailable
+  and unrelated peers cannot read or clear the owned queue. See
+  [the queue contract](queue-editing-contract.md) for source evidence and acceptance cases.

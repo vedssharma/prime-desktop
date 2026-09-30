@@ -67,3 +67,17 @@ The `Release artifacts` workflow runs only on explicit dispatch. It tests, build
 checks notices, runs a fake-daemon packaged smoke test, and uploads artifacts for
 review. Signed jobs require protected environment secrets; unsigned jobs are labeled
 as such. It intentionally does not create a public release automatically.
+
+## Required signed-artifact verification
+
+`release:signed` now checks the packaged app before generating checksums. It requires
+`codesign --verify --deep --strict`, a Developer ID Application identity with a team
+and hardened runtime, Gatekeeper execution assessment, and `xcrun stapler validate`.
+A failure prevents success reporting and checksum generation. The workflow repeats
+verification after the packaged smoke test and uploads `SIGNING_VERIFICATION.json`
+with the artifacts. This report records successful checks, not credential values.
+
+The verifier locates the single built macOS app without assuming host architecture.
+Policy and failure-path tests run on Linux with injected command results; they do
+not establish actual Apple signing or notarization. That final validation requires
+a macOS runner and the protected credentials listed above.

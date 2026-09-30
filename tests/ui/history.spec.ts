@@ -4,8 +4,8 @@ async function open(page: Page) {
     const now=new Date().toISOString();
     const sessions:any[]=[{id:'closed',title:'Saved desktop',cwd:'/tmp',model:'fixture/vision',status:'idle',createdAt:now,updatedAt:now,ownership:'desktop',writable:false,lifecycle:'closed'}, {id:'shared',title:'Shared CLI',cwd:'/tmp',model:'',status:'idle',createdAt:now,updatedAt:now,ownership:'shared',writable:false}];
     const state=(window as any).__history={calls:[] as any[], reject:false, delay:false, settle:null as any};
-    const operation=(mode:string,id:string,consent:boolean)=>{
-      state.calls.push([mode,id,consent]);
+    const operation=(mode:string,id:string,consent:boolean,entryId?:string)=>{
+      state.calls.push(entryId ? [mode,id,consent,entryId] : [mode,id,consent]);
       return new Promise((resolve,reject)=>{
         const settle=()=>{state.settle=null;if(state.reject){reject(Error('Session lease is held by another owner'));return;}
           const session={...sessions[0],id:mode==='fork'?'fork':'closed',title:mode==='fork'?'Fork of Saved desktop':'Saved desktop',lifecycle:'open',writable:true};
@@ -17,7 +17,7 @@ async function open(page: Page) {
     };
     (window as any).prime={
       status:async()=>({connected:true,canCreateOwned:true,readOnly:true,home:'/tmp'}),listSessions:async()=>sessions,listModels:async()=>[],getMessages:async()=>[{id:'m',role:'user',content:'Saved history'}],
-      resumeOwnedSession:(id:string,consent:boolean)=>operation('resume',id,consent),forkOwnedSession:(id:string,consent:boolean)=>operation('fork',id,consent),
+      resumeOwnedSession:(id:string,consent:boolean)=>operation('resume',id,consent),forkOwnedSession:(id:string,consent:boolean,entryId?:string)=>operation('fork',id,consent,entryId),
       sendMessage:async()=>{state.calls.push(['send']);},setSessionModel:async()=>{},openDirectory:async()=>{},
     };
   });
@@ -68,4 +68,13 @@ test('shared CLI history has no fork or resume action', async ({page})=>{
   await page.getByRole('button',{name:'Session actions',exact:true}).click();
   await expect(page.getByRole('button',{name:'Resume saved session',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Fork saved session',exact:true})).toHaveCount(0);
+});
+
+test('select an earlier message before giving fork consent', async ({page})=>{
+ await open(page);await action(page,'Fork saved session');const dialog=page.getByRole('dialog');
+ await dialog.getByLabel('Fork through message').selectOption('m');
+ await dialog.getByRole('checkbox',{name:/I trust this workspace/}).check();
+ await dialog.getByRole('button',{name:'Create fork'}).click();
+ await expect(dialog).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).__history.calls)).toEqual([['fork','closed',true,'m']]);
 });

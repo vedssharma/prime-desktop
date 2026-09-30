@@ -31,8 +31,9 @@ try {
  await expect(page.evaluate(image=>window.prime.sendMessage('bad','no',[{...image,data:'invalid'}]),image)).rejects.toThrow(/image data/i);
  await page.evaluate(id=>window.prime.setSessionModel(id,'fixture/text-only'),owned.id);
  await expect(page.evaluate(({id,image})=>window.prime.sendMessage(id,'no',[image]),{id:owned.id,image})).rejects.toThrow(/image support/);
+ await page.evaluate(id=>window.prime.sendMessage(id,'Excluded later turn'),owned.id);
  await page.evaluate(id=>window.prime.closeOwnedSession(id),owned.id);
- expect((await page.evaluate(id=>window.prime.getMessages(id),owned.id))[0].images).toEqual([image]);
+ expect((await page.evaluate(id=>window.prime.getMessages(id),owned.id))[1].images).toEqual([image]);
  await expect.poll(async()=> (await page.evaluate(()=>window.prime.listSessions())).find(s=>s.id===owned.id)?.writable).toBe(false);
  await expect(page.evaluate(id=>window.prime.resumeOwnedSession(id,false),owned.id)).rejects.toThrow(/trust/);
  await expect(page.evaluate(()=>window.prime.forkOwnedSession('unrelated-shared-session',true))).rejects.toThrow(/Read-only compatibility/);
@@ -41,11 +42,15 @@ try {
  await page.getByRole('button',{name:'Fork saved session',exact:true}).click();
  let historyDialog=page.getByRole('dialog');
  await expect(historyDialog.getByRole('button',{name:'Create fork'})).toBeDisabled();
+ const savedMessages=await page.evaluate(id=>window.prime.getMessages(id),owned.id);
+ await historyDialog.getByLabel('Fork through message').selectOption(savedMessages[1].id);
  await historyDialog.getByRole('checkbox',{name:/I trust this workspace/}).check();
  await historyDialog.getByRole('button',{name:'Create fork'}).click();
  await expect(page.locator('.session-item.selected')).toContainText('Fork of WRITE_FIXTURE_FILE');
  const fork=(await page.evaluate(()=>window.prime.listSessions())).find(session=>session.id!==owned.id&&session.ownership==='desktop');
  expect(fork.id).not.toBe(owned.id);expect(fork.writable).toBe(true);
+ expect((await page.evaluate(id=>window.prime.getMessages(id),fork.id)).length).toBe(2);
+ expect((await page.evaluate(id=>window.prime.getMessages(id),owned.id)).length).toBe(3);
  await page.locator('.session-item').filter({hasText:'WRITE_FIXTURE_FILE'}).filter({hasNotText:'Fork of'}).click();
  await page.getByRole('button',{name:'Session actions',exact:true}).click();
  await page.getByRole('button',{name:'Resume saved session',exact:true}).click();

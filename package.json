@@ -26,7 +26,7 @@
     "electron:install": "node node_modules/electron/install.js",
     "release:unsigned": "node scripts/release.mjs",
     "release:signed": "node scripts/release.mjs --signed",
-    "test:release": "node --test tests/release-policy.test.mjs",
+    "test:release": "node --test tests/release-policy.test.mjs tests/signed-release.test.mjs",
     "test:owned": "npm run build && node scripts/test-owned-electron.mjs",
     "test:real-owned": "npm run build && node scripts/test-real-owned-rpc.mjs"
   },

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';
+import { historyThroughMessage } from '../dist-electron/history-fork.js';
 import { normalizeMessages, parseSavedTranscript } from '../dist-electron/prime.js';
 
 const binary = process.argv[2];
@@ -98,13 +99,15 @@ try {
   report.clientOwned = true;
   report.peerDenials = [];
   for (const activeSessionId of [descriptor.rootActiveSessionId, state.sessionId]) {
-    for (const type of ['get_state', 'new_session']) {
+    for (const type of ['get_state', 'new_session', 'get_queue', 'clear_queue']) {
       const result = await peerChannel.request({ type, activeSessionId });
       assert.equal(result.success, false, JSON.stringify(result));
       assert.match(result.error, /Unknown active session/);
       report.peerDenials.push({ type, selector: activeSessionId === state.sessionId ? 'persistent' : 'active', error: result.error });
     }
   }
+  await assert.rejects(rpcChannel.request({type:'get_queue'}),/No response to get_queue/);
+  report.ownedRpcQueueUnavailable = true;
   const unchanged = await rpcChannel.request({ type: 'get_state' });
   assert.equal(unchanged.data.sessionId, state.sessionId);
   report.identityUnchanged = true;
@@ -120,6 +123,21 @@ try {
   catch (error) { if (error.code === 'ENOENT') report.fileNotYetWrittenWithoutPrompt = true; else throw error; }
   // Exercise explicit startup resume/fork on private synthetic history, never a provider prompt.
   await appendFile(state.sessionFile, JSON.stringify({type:'message', id:'probe-entry', parentId:null, timestamp:new Date().toISOString(), message:{role:'user',content:[{type:'text',text:'Private lifecycle fixture'}],timestamp:Date.now()}}) + '\n');
+  await appendFile(state.sessionFile, JSON.stringify({type:'message',id:'later-entry',parentId:'probe-entry',timestamp:new Date().toISOString(),message:{role:'user',content:[{type:'text',text:'Excluded later message'}],timestamp:Date.now()}})+'\n');
+  const snapshotFile = join(sessions,'.partial.snapshot');
+  await writeFile(snapshotFile,historyThroughMessage(await readFile(state.sessionFile,'utf8'),'probe-entry'),{mode:0o600});
+  const partial = launch('rpc',['--fork',snapshotFile]);
+  const partialChannel = channel(partial.stdout,partial.stdin);
+  const partialState = await partialChannel.request({type:'get_state'});
+  assert.equal(partialState.success,true,JSON.stringify(partialState));
+  assert.notEqual(partialState.data.sessionId,state.sessionId);
+  const partialMessages = (await partialChannel.request({type:'get_messages'})).data.messages;
+  assert.equal(partialMessages.filter(message=>message.role==='user').length,1);
+  assert.equal(partialMessages.find(message=>message.role==='user').content[0].text,'Private lifecycle fixture');
+  assert.equal(JSON.stringify(partialMessages).includes('Excluded later message'),false);
+  partial.stdin.end();
+  assert.equal((await deadline(partial.done,20000,'Partial fork did not exit'))[0],0);
+  report.earlierMessageForkVerified = true;
   const sourceBytes = await readFile(state.sessionFile);
   const forked = launch('rpc', ['--fork', state.sessionFile]);
   const forkChannel = channel(forked.stdout, forked.stdin);

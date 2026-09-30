@@ -93,8 +93,9 @@ Close a desktop-owned session, select it in the sidebar, and open **Session acti
 
 Both actions require renewed workspace trust and verified Prime Agent 0.9.6. Neither
 sends a prompt automatically. Shared CLI sessions cannot be resumed or forked by the
-desktop. A live desktop session must be closed first; opening an individual earlier
-message as a fork is not offered. Identity mismatches, unavailable workspaces, and
+desktop. A live desktop session must be closed first. The fork dialog can copy full
+history or history through a selected earlier user/assistant message, including that
+message. Assistant messages containing tool calls cannot be selected. Identity mismatches, unavailable workspaces, and
 ownership conflicts fail visibly without takeover or automatic retry.
 
 ## Image attachments
@@ -183,7 +184,7 @@ saved default may change too. Shared sessions cannot be switched from this app.
 - The queue shows the agent-reported follow-up count. Queued text, reordering and cancellation
   need upstream IDs/versioning. Closed desktop history supports explicit startup fork and resume.
   Usage, compaction and image attachments are implemented.
-- Fork/resume is restricted to closed desktop-owned history. Forking an individual earlier message and opening shared CLI sessions for writes remain unsupported (see `docs/owned-rpc-design.md`).
+- Fork/resume is restricted to closed desktop-owned history. Earlier-message forks require version 3 history; opening shared CLI sessions for writes remains unsupported (see `docs/owned-rpc-design.md`).
 
 `npm run test:electron` uses disposable simulated daemons/RPC processes, including a
 deterministic file write in a temporary workspace. It makes no LLM request.

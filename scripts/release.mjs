@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { verifySignedRelease } from './verify-signed-release.mjs';
 import { releasePolicy } from './release-policy.mjs';
 
 const signed = process.argv.includes('--signed');
@@ -11,6 +12,7 @@ const run = (command, args) => { const result = spawnSync(command, args, { stdio
 const oldArtifacts = await readdir('release').catch(() => []);
 if (oldArtifacts.some(name => /\.(dmg|zip|AppImage)$/.test(name))) throw new Error('Existing release archives found. Move them elsewhere before making a release; refusing stale checksums.');
 run('npm', ['run', 'dist', '--', ...policy.args]);
+if (signed) await verifySignedRelease();
 // A private, gated build; this script never uploads/publishes a GitHub release.
 const artifacts = (await readdir('release')).filter(name => /\.(dmg|zip|AppImage)$/.test(name)).sort();
 if (!artifacts.length) throw new Error('No release artifacts were generated');

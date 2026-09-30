@@ -61,7 +61,7 @@ export interface PrimeAPI {
   setSessionModel(id: string, model: string): Promise<void>;
   closeOwnedSession(id: string): Promise<void>;
   resumeOwnedSession(id: string, allowFileChanges: boolean): Promise<Session>;
-  forkOwnedSession(id: string, allowFileChanges: boolean): Promise<Session>;
+  forkOwnedSession(id: string, allowFileChanges: boolean, entryId?: string): Promise<Session>;
   createSession(input: CreateSessionInput): Promise<Session>;
   sendMessage(id: string, text: string, images?: ImageAttachment[]): Promise<void>;
   interruptSession(id: string): Promise<void>;
