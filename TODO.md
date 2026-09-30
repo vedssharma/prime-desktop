@@ -14,7 +14,7 @@ for full functionality: Prime Agent 0.9.5 has no atomic persistent-session ident
 precondition. Existing shared CLI sessions intentionally remain **read-only**; their writes/queue mutations fail before dispatch. Verified CLI0.9.6 now supports **new desktop-owned RPC sessions** through a separate client-owned process/allowlist. Persisted browsing, settings, clipboard, connection controls, and diagnostics remain available. Closed desktop sessions are read-only until explicitly resumed with renewed workspace trust; startup forks create separate owned conversations. Do not restore
 writes with an unsafe override or another catalog preflight.
 
-Item **18** has release automation and tested unsigned builds, but actual Apple
+Item **18** has release automation, mandatory signed-artifact verification (Developer ID, hardened runtime, Gatekeeper and stapled ticket), and tested unsigned builds, but actual Apple
 signing/notarization is unverified until private credentials are supplied. No public
 binary release is uploaded automatically. See `docs/daemon-safety.md` and
 `docs/releases.md` for the remaining requirements.
