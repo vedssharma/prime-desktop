@@ -1,5 +1,6 @@
+import { historyThroughMessage } from './history-fork.js';
 import { execFile, spawn } from 'node:child_process';
-import { access, readFile, stat, lstat, realpath } from 'node:fs/promises';
+import { access, readFile, stat, lstat, realpath, writeFile, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { OwnedRpcSession, type OwnedRpcStats as SessionUsage } from './owned-rpc.js';
 import { OwnedStore, type OwnedMetadata } from './owned-store.js';
@@ -293,8 +294,8 @@ export class PrimeService {
     });
   }
   resumeOwnedSession(id: string, allowFileChanges: boolean): Promise<Session> { return this.openHistory(id, 'resume', allowFileChanges); }
-  forkOwnedSession(id: string, allowFileChanges: boolean): Promise<Session> { return this.openHistory(id, 'fork', allowFileChanges); }
-  private async openHistory(id: string, mode: 'resume' | 'fork', consent: boolean): Promise<Session> {
+  forkOwnedSession(id: string, allowFileChanges: boolean, entryId?: string): Promise<Session> { return this.openHistory(id, 'fork', allowFileChanges, entryId); }
+  private async openHistory(id: string, mode: 'resume' | 'fork', consent: boolean, entryId?: string): Promise<Session> {
     if (this.closing) throw Error('Desktop sessions are closing.');
     if (this.openingHistory.has(id)) throw Error('This saved session is already opening.');
     this.openingHistory.add(id);
@@ -309,7 +310,7 @@ export class PrimeService {
       await this.store!.initialize();
       const file = source.metadata.sessionFile;
       if (!(await lstat(file)).isFile() || await realpath(file) !== resolve(file) || dirname(file) !== this.store!.transcripts) throw Error('Saved history must be a regular file inside desktop storage.');
-      const contents = await readBoundedFile(file);
+      let contents = await readBoundedFile(file);
       let header: WireRecord;
       try { header = JSON.parse(contents.split('\n', 1)[0]); } catch { throw Error('Invalid saved session header.'); }
       if (header?.type !== 'session' || header.id !== source.metadata.sessionId) throw Error('Saved session identity mismatch.');
@@ -320,14 +321,22 @@ export class PrimeService {
       parseSavedTranscript(contents);
       if (contents.split('\n').slice(1).some(line => { try { return JSON.parse(line)?.type === 'session'; } catch { return false; } })) throw Error('Multiple session headers. Refusing ambiguous saved history.');
       if (this.closing) throw Error('Desktop sessions are closing.');
-      const rpc = await OwnedRpcSession.launch({ executable: await this.cli(), cwd, sessionDir: this.store!.transcripts, socketPath: this.transport.socketPath, source: {mode, sessionFile:file, sessionId:source.metadata.sessionId} });
+      let launchFile = file;
+      if (entryId !== undefined) {
+        contents = historyThroughMessage(contents, entryId);
+        launchFile = join(this.store!.transcripts, '.fork-source-' + randomUUID() + '.snapshot');
+        await writeFile(launchFile, contents, {flag:'wx', mode:0o600});
+      }
+      let rpc: OwnedRpcSession;
+      try { rpc = await OwnedRpcSession.launch({ executable: await this.cli(), cwd, sessionDir: this.store!.transcripts, socketPath: this.transport.socketPath, source: {mode, sessionFile:launchFile, sessionId:source.metadata.sessionId} }); }
+      catch (error) { if (launchFile !== file) await unlink(launchFile).catch(() => {}); throw error; }
       try {
         const state = await rpc.getState();
         if (mode === 'fork') {
           // Verify what the CLI copied, not just a header checked before an asynchronous launch.
           const forkContents = await readBoundedFile(rpc.sessionFile);
           const forkHeader = JSON.parse(forkContents.split('\n', 1)[0]);
-          if (forkHeader?.type !== 'session' || forkHeader.id !== rpc.id || forkHeader.parentSession !== file ||
+          if (forkHeader?.type !== 'session' || forkHeader.id !== rpc.id || forkHeader.parentSession !== launchFile ||
               JSON.stringify(normalizeMessages(parseSavedTranscript(forkContents))) !== JSON.stringify(normalizeMessages(parseSavedTranscript(contents)))) {
             throw Error('Fork history mismatch. The saved source changed or the CLI copied different history.');
           }
@@ -341,7 +350,7 @@ export class PrimeService {
         const entry: OwnedEntry = {metadata,rpc,state};
         this.owned.set(metadata.id,entry); this.observeOwned(entry);
         return this.ownedSession(entry);
-      } catch (error) { await rpc.close(); throw error; }
+      } catch (error) { await rpc.close(); if (launchFile !== file) await unlink(launchFile).catch(() => {}); throw error; }
     })();
     this.creations.add(task);
     try { return await task; }

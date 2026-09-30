@@ -26,7 +26,7 @@ test('desktop-owned pipe writes only its fixture workspace, persists history, an
   await assert.rejects(service.deleteSession(session.id),/Read-only compatibility/);
   await service.closeOwnedSession(session.id);
   await assert.rejects(service.sendMessage(session.id,'no'),/closed/);
-  assert.equal((await service.getMessages(session.id)).length,1); // fixture writes independent branch per turn
+  assert.equal((await service.getMessages(session.id)).length,2); // fixture retains a coherent conversation branch
   assert(daemon.commands.every(command=>command.type==='list'));
   await service.close();
   const reopened=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:daemon.socketPath});
@@ -273,5 +273,20 @@ test('fork verifies the copied history when the source changes during CLI startu
   await assert.rejects(service.forkOwnedSession(original.id,true),/Fork history mismatch/);
   assert.equal(await service.hasOpenOwnedSessions(),false);
   assert.equal((await service.listSessions()).length,1);
+ });
+});
+
+test('earlier-message fork uses a private snapshot and preserves the complete source', async () => {
+ await ownedFixture(async(service,dir)=>{
+  const original=await service.createSession({cwd:dir,prompt:'First message',allowFileChanges:true});
+  await service.sendMessage(original.id,'Later message');
+  await service.closeOwnedSession(original.id);
+  const messages=await service.getMessages(original.id);
+  const fork=await service.forkOwnedSession(original.id,true,messages[0].id);
+  assert.deepEqual((await service.getMessages(fork.id)).map(message=>message.content),['First message']);
+  assert.equal((await service.getMessages(original.id)).length,2);
+  await assert.rejects(service.forkOwnedSession(original.id,true,'absent'),/Select/);
+  await service.sendMessage(fork.id,'Independent continuation');
+  assert.equal((await service.getMessages(original.id)).length,2);
  });
 });

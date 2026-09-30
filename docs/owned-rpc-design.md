@@ -239,7 +239,11 @@ the new process. Forks get separate metadata; resume keeps the existing record. 
 is tracked during shutdown, duplicate opens are rejected, and upstream lease errors
 are never retried or used to attach to another owner. Neither action submits a prompt.
 A running session must be explicitly closed before either action. Earlier-message
-forks and shared CLI history are outside this contract.
+forks validate the current version-3 branch and write a private, exclusive-create
+snapshot through the selected user/assistant entry. The snapshot is passed to the
+same startup fork boundary and retained as its parent history. Later entries and
+alternate branches are omitted; assistant tool calls, broken ancestry, duplicate
+IDs and cycles fail closed. Shared CLI history remains outside this contract.
 
 Source evidence at the same pinned upstream commit: `src/main.ts` classifies RPC as
 client-owned, resolves explicit `--resume` / `--fork` selections before connection

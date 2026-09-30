@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   setSessionModel: (id: string, model: string) => invoke('setSessionModel', id, model),
   closeOwnedSession: (id: string) => invoke('closeOwnedSession', id),
   resumeOwnedSession: (id: string, allowFileChanges: boolean) => invoke('resumeOwnedSession', id, allowFileChanges),
-  forkOwnedSession: (id: string, allowFileChanges: boolean) => invoke('forkOwnedSession', id, allowFileChanges),
+  forkOwnedSession: (id: string, allowFileChanges: boolean, entryId?: string) => invoke('forkOwnedSession', id, allowFileChanges, entryId),
   sendMessage: (id: string, text: string, images?: ImageAttachment[]) => invoke('sendMessage', id, text, images),
   interruptSession: (id: string) => invoke('interruptSession', id),
   getSessionUsage: (id: string) => invoke('getSessionUsage', id),

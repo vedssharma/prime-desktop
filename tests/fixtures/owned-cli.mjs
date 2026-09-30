@@ -11,7 +11,7 @@ const source = process.argv.includes('--resume') ? value('--resume') : process.a
 const records = source ? readFileSync(source,'utf8').trim().split('\n').map(line=>JSON.parse(line)) : [];
 const id = process.argv.includes('--resume') ? records[0].id : randomUUID();
 const file = process.argv.includes('--resume') ? source : join(dir, id + '.jsonl');
-if (!process.argv.includes('--resume')) writeFileSync(file, JSON.stringify({ type: 'session', id, cwd, ...(source?{parentSession:source}:{}) }) + '\n' + records.slice(1).map(record=>JSON.stringify(record)+'\n').join(''));
+if (!process.argv.includes('--resume')) writeFileSync(file, JSON.stringify({ type: 'session', version: 3, id, cwd, ...(source?{parentSession:source}:{}) }) + '\n' + records.slice(1).map(record=>JSON.stringify(record)+'\n').join(''));
 let leaf = records.at(-1)?.id ?? null;
 const selected = process.argv.includes('--model') ? value('--model').split('/').slice(1).join('/') : records.findLast(record=>record.type==='model_change')?.modelId ?? 'fixture-model';
 const messages = records.filter(record=>record.type==='message').map(record=>record.message); let failState = false; let queued = 0; let compacted = false; let model = { provider:'fixture', id:selected, name:'Fixture model', input:selected==='text-only'?['text']:['text','image'] };
@@ -26,7 +26,7 @@ function handle(command) {
  if(command.type==='prompt') {
   if(command.message==='ACCEPT_THEN_FAIL_READ') failState=true;
   const msg={role:'user',content: command.images?.length ? [{type:'text',text:command.message}, ...command.images] : command.message,timestamp:Date.now()};messages.push(msg);
-  leaf=randomUUID();appendFileSync(file,JSON.stringify({type:'message',id:leaf,parentId:null,message:msg})+'\n');
+  const parentId=leaf;leaf=randomUUID();appendFileSync(file,JSON.stringify({type:'message',id:leaf,parentId,message:msg})+'\n');
   // This explicit fixture instruction is not a model call or arbitrary code execution.
   if(command.message==='WRITE_FIXTURE_FILE') writeFileSync(join(cwd,'owned-proof.txt'),'written by isolated RPC fixture\n');
   // Streaming markers emit agent events the way a real run would, without a model call.
