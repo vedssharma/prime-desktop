@@ -33,7 +33,7 @@ handling. Direct saves need external-change detection and recoverable backups.
 Git diff/review is not a sandbox or a guarantee that arbitrary agent tools stay in
 one directory. Show these limits accurately.
 
-## Step 5 — queue and harness features (usage, compaction and image attachments implemented)
+## Step 5 — queue and harness features (usage, compaction, image attachments and saved-history startup implemented)
 
 Expose only documented operations safe within the verified owned-session boundary.
 Queue previews without IDs/versioning cannot promise conflict-free editing.
@@ -61,13 +61,20 @@ Implemented for desktop-owned sessions (RPC per upstream `docs/rpc.md`, v0.9.6):
   Unsupported/oversized historical images display an unavailable notice.
   Native Electron tests use disposable image fixtures and make no model request.
 
+- **Saved-history fork / resume:** explicit startup `--fork <file>` creates a
+  separate owned process, persistent identity, transcript and desktop metadata record.
+  `--resume <file>` binds a new owned pipe to the exact expected saved identity.
+  Both accept only closed desktop-owned history, require renewed workspace trust,
+  validate the stored header/workspace/path, and reject duplicate openings or upstream
+  lease conflicts. No prompt is sent automatically; no navigation RPC is enabled.
+  Native no-prompt coverage on pinned v0.9.6 verifies peer denial, separate fork identity,
+  parent history, exact resume identity and rejection of concurrent resume. Native
+  Electron fixture tests cover the dialogs, IPC and independent follow-ups.
+
 Still open, each needing its own design and native integration coverage:
 
-- **Fork / clone:** `fork`, `clone` and `switch_session` re-point the RPC process at a
-  different session file. That is exactly the identity change the owned-session guard
-  treats as a fault and freezes on. Supporting it means a new model where a fork is a
-  new desktop-owned session (new process, new metadata record) rather than a mutation
-  of the current one, plus a decision about which entry IDs the UI may offer.
+- **Fork from an earlier message:** selecting individual entry IDs and safely making
+  a partial-history fork is not implemented. Current startup fork copies saved history.
 
 - **Queue editing:** unchanged; the count is shown, but message text and cancellation
   are not available without IDs/versioning.

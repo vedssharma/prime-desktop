@@ -131,7 +131,7 @@ combined decoded bytes. The complete UTF-8 JSON command including UUID and LF mu
 fit the 1 MiB input frame limit. The renderer picker additionally checks decoding
 and dimensions. No file paths, remote images, or SVG payloads are passed as prompts.
 
-Leading slash commands are rejected. No navigation, resume, fork, clone, import,
+Leading slash commands are rejected. No runtime navigation, resume, fork, clone, import,
 raw command API, extension UI approval, or schedule/heartbeat mutation is exposed.
 `--no-extensions` disables discovery, and no explicit `--extension` is passed.
 Unexpected extension UI closes the connection.
@@ -200,8 +200,9 @@ replacement races in the first place.
   (`daemon-supervisor.ts:249`, `:1960`). A stable-identity reconnect can cancel it.
   Killing the subprocess does not prove immediate worker termination.
 - The desktop closes only its own pipe/process. It never issues daemon shutdown.
-  Saved closed sessions are not automatically resumed by this wrapper. Lease
-  conflicts must surface as errors, never trigger a takeover.
+  Saved closed sessions are never automatically resumed. Explicit startup resume
+  and fork follow the validated selection contract below. Lease conflicts surface
+  as errors, never trigger a takeover.
 
 ## Authentication UI
 
@@ -218,3 +219,40 @@ The desktop mirrors upstream launch sanitation: all `PRIME_AGENT_INTERNAL_*` var
 are removed, along with startup benchmarking and Node/Bun/Electron injection variables.
 This prevents inheriting a parent agent worker role that bypasses client ownership.
 Native provider/profile configuration remains inherited; values are never logged.
+
+
+## Explicit startup selection for closed desktop history
+
+The desktop can now start an owned RPC subprocess with either `--resume <absolute
+saved transcript>` or `--fork <absolute saved transcript>`. This is a startup choice
+made before binding the pipe, not a command that changes an already-bound identity.
+Only closed desktop-owned records qualify, and every action requires renewed workspace
+trust. The main process resolves the file from its own metadata, rejects symlinks and
+paths outside its transcript directory, validates one saved header and its persistent
+identity and original workspace, and bounds/parses the history before launch. Fork startup also verifies the new header and compares
+its normalized saved history with the source snapshot, rejecting source changes
+during asynchronous CLI startup.
+
+`--resume` must return the exact expected session ID and canonical file; `--fork`
+must return a different ID and file directly inside desktop storage. A mismatch closes
+the new process. Forks get separate metadata; resume keeps the existing record. Opening
+is tracked during shutdown, duplicate opens are rejected, and upstream lease errors
+are never retried or used to attach to another owner. Neither action submits a prompt.
+A running session must be explicitly closed before either action. Earlier-message
+forks and shared CLI history are outside this contract.
+
+Source evidence at the same pinned upstream commit: `src/main.ts` classifies RPC as
+client-owned, resolves explicit `--resume` / `--fork` selections before connection
+creation, bypasses resident-worker attachment for client-owned requests, and sends
+`create` with `lifecycle: "client_owned"`. `SessionManager.forkFrom` creates a distinct
+header/file with `parentSession`, while preserving the source history. The supervisor
+rejects conflicting ownership and transcript leases. No runtime `fork`, `clone`,
+`switch_session`, `new_session`, import, or scheduling command was added to this wrapper.
+
+The expanded `scripts/test-real-owned-rpc.mjs` was run against a Node build of upstream
+v0.9.6, commit `e260085dd8f742e0def3d871860c9a888b114851`. It used a private HOME,
+supervisor, catalog fixture and synthetic saved message, with no inherited credentials
+or provider prompts. It verified unchanged source bytes during a fork from closed
+history, distinct fork identity and parent, exact resume identity, denial of peer
+navigation, concurrent-resume rejection, and successful EOF cleanup. This validates
+ownership/lifecycle, not provider inference or a packaged native CLI distribution.

@@ -42,7 +42,7 @@ export function normalizeMessages(messages: WireRecord[]): Message[] {
     const timestamp = date(message.timestamp);
     if (message.role === 'custom' && message.display === false) return;
     const role: Message['role'] = message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : ['toolResult', 'bashExecution'].includes(message.role) ? 'tool' : 'system';
-    const blocks: WireRecord[] = Array.isArray(message.content) ? message.content : [];
+    const blocks: WireRecord[] = Array.isArray(message.content) ? message.content.filter(isRecord) : [];
     let content = typeof message.content === 'string' ? message.content : blocks.filter(block => block.type === 'text').map(block => text(block.text)).join('\n');
     if (['branchSummary', 'compactionSummary'].includes(message.role)) content = `${message.role === 'branchSummary' ? 'Branch summary' : 'Context summary'}\n\n${text(message.summary)}`;
     if (message.role === 'bashExecution') content = `$ ${text(message.command)}\n${text(message.output)}`;
@@ -51,7 +51,6 @@ export function normalizeMessages(messages: WireRecord[]): Message[] {
     for (const block of blocks.filter(block => block.type === 'image')) {
       try { validateImages([...images, block]); images.push(validateImages([block])[0]); }
       catch { content += '\n[Image attachment unavailable: unsupported type or size]'; }
-      if (images.length === 4) break;
     }
     if (content.trim() || images.length) output.push({ id, role, content, timestamp, ...(images.length ? { images } : {}), ...(message.toolName ? { toolName: text(message.toolName) } : {}) });
     blocks.filter(block => block.type === 'toolCall').forEach((block, i) => {
@@ -154,7 +153,7 @@ export class PrimeService {
     if (this.closing) throw Error('Desktop sessions are closing.');
     const entry = this.owned.get(id);
     if (!entry) return this.assertWritable();
-    if (!entry.rpc?.alive) throw Error('This desktop session is closed. Its saved history is read-only. Start a new session to continue.');
+    if (!entry.rpc?.alive) throw Error('This desktop session is closed. Its saved history is read-only. Use Resume saved session or start a new session to continue.');
     return entry as typeof entry & { rpc: OwnedRpcSession };
   }
   async hasOpenOwnedSessions() { return this.creations.size > 0 || [...this.owned.values()].some(entry => entry.rpc?.alive); }
@@ -324,6 +323,15 @@ export class PrimeService {
       const rpc = await OwnedRpcSession.launch({ executable: await this.cli(), cwd, sessionDir: this.store!.transcripts, socketPath: this.transport.socketPath, source: {mode, sessionFile:file, sessionId:source.metadata.sessionId} });
       try {
         const state = await rpc.getState();
+        if (mode === 'fork') {
+          // Verify what the CLI copied, not just a header checked before an asynchronous launch.
+          const forkContents = await readBoundedFile(rpc.sessionFile);
+          const forkHeader = JSON.parse(forkContents.split('\n', 1)[0]);
+          if (forkHeader?.type !== 'session' || forkHeader.id !== rpc.id || forkHeader.parentSession !== file ||
+              JSON.stringify(normalizeMessages(parseSavedTranscript(forkContents))) !== JSON.stringify(normalizeMessages(parseSavedTranscript(contents)))) {
+            throw Error('Fork history mismatch. The saved source changed or the CLI copied different history.');
+          }
+        }
         if (this.closing) throw Error('Desktop closed before saved history opened.');
         const now = new Date().toISOString();
         const metadata: OwnedMetadata = mode === 'resume'

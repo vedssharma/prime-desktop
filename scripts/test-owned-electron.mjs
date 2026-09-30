@@ -34,5 +34,29 @@ try {
  await page.evaluate(id=>window.prime.closeOwnedSession(id),owned.id);
  expect((await page.evaluate(id=>window.prime.getMessages(id),owned.id))[0].images).toEqual([image]);
  await expect.poll(async()=> (await page.evaluate(()=>window.prime.listSessions())).find(s=>s.id===owned.id)?.writable).toBe(false);
- console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history. No LLM request made.');
+ await expect(page.evaluate(id=>window.prime.resumeOwnedSession(id,false),owned.id)).rejects.toThrow(/trust/);
+ await expect(page.evaluate(()=>window.prime.forkOwnedSession('unrelated-shared-session',true))).rejects.toThrow(/Read-only compatibility/);
+ // Native dialogs require renewed trust; startup does not submit any prompt.
+ await page.getByRole('button',{name:'Session actions',exact:true}).click();
+ await page.getByRole('button',{name:'Fork saved session',exact:true}).click();
+ let historyDialog=page.getByRole('dialog');
+ await expect(historyDialog.getByRole('button',{name:'Create fork'})).toBeDisabled();
+ await historyDialog.getByRole('checkbox',{name:/I trust this workspace/}).check();
+ await historyDialog.getByRole('button',{name:'Create fork'}).click();
+ await expect(page.locator('.session-item.selected')).toContainText('Fork of WRITE_FIXTURE_FILE');
+ const fork=(await page.evaluate(()=>window.prime.listSessions())).find(session=>session.id!==owned.id&&session.ownership==='desktop');
+ expect(fork.id).not.toBe(owned.id);expect(fork.writable).toBe(true);
+ await page.locator('.session-item').filter({hasText:'WRITE_FIXTURE_FILE'}).filter({hasNotText:'Fork of'}).click();
+ await page.getByRole('button',{name:'Session actions',exact:true}).click();
+ await page.getByRole('button',{name:'Resume saved session',exact:true}).click();
+ historyDialog=page.getByRole('dialog');
+ await expect(historyDialog.getByRole('button',{name:'Resume session',exact:true})).toBeDisabled();
+ await historyDialog.getByRole('checkbox',{name:/I trust this workspace/}).check();
+ await historyDialog.getByRole('button',{name:'Resume session',exact:true}).click();
+ await expect(historyDialog).toHaveCount(0);
+ expect((await page.evaluate(()=>window.prime.listSessions())).find(session=>session.id===owned.id).writable).toBe(true);
+ await page.evaluate(id=>window.prime.sendMessage(id,'Resumed fixture follow-up'),owned.id);
+ expect((await page.evaluate(id=>window.prime.getMessages(id),fork.id)).at(-1).images).toEqual([image]);
+ expect((await page.evaluate(id=>window.prime.getMessages(id),owned.id)).at(-1).content).toBe('Resumed fixture follow-up');
+ console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history, consent-based fork/resume and independent follow-ups. No LLM request made.');
 }catch(error){console.error(error);throw error;}finally{await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});}).catch(()=>{});try{const page=await app.firstWindow();await page.evaluate(async()=>{for(const session of await window.prime.listSessions())if(session.ownership==='desktop')await window.prime.closeOwnedSession(session.id);});}catch{}await app.close();await rm(dir,{recursive:true,force:true});}

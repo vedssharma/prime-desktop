@@ -13,7 +13,7 @@ const id = process.argv.includes('--resume') ? records[0].id : randomUUID();
 const file = process.argv.includes('--resume') ? source : join(dir, id + '.jsonl');
 if (!process.argv.includes('--resume')) writeFileSync(file, JSON.stringify({ type: 'session', id, cwd, ...(source?{parentSession:source}:{}) }) + '\n' + records.slice(1).map(record=>JSON.stringify(record)+'\n').join(''));
 let leaf = records.at(-1)?.id ?? null;
-const selected = process.argv.includes('--model') ? value('--model').split('/').slice(1).join('/') : 'fixture-model';
+const selected = process.argv.includes('--model') ? value('--model').split('/').slice(1).join('/') : records.findLast(record=>record.type==='model_change')?.modelId ?? 'fixture-model';
 const messages = records.filter(record=>record.type==='message').map(record=>record.message); let failState = false; let queued = 0; let compacted = false; let model = { provider:'fixture', id:selected, name:'Fixture model', input:selected==='text-only'?['text']:['text','image'] };
 function event(value) { process.stdout.write(JSON.stringify(value)+'\n'); }
 function reply(command, success, data, error) { process.stdout.write(JSON.stringify({ type:'response',command:command.type,id:command.id,success,data,error })+'\n'); }

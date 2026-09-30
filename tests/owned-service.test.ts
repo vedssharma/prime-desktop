@@ -262,3 +262,16 @@ test('shutdown waits for saved-history startup and leaves no owned process runni
   assert.equal(await service.hasOpenOwnedSessions(),false);
  });
 });
+
+test('fork verifies the copied history when the source changes during CLI startup', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const original=await service.createSession({cwd:dir,prompt:'Original',allowFileChanges:true});
+  await service.closeOwnedSession(original.id);
+  const cli=join(dir,'prime-agent');
+  const code=await readFile(cli,'utf8');
+  await writeFile(cli,code.replace('const records = source ?', "if (process.argv.includes('--fork')) writeFileSync(source,readFileSync(source,'utf8').replace('Original','Replaced'));\nconst records = source ?"));
+  await assert.rejects(service.forkOwnedSession(original.id,true),/Fork history mismatch/);
+  assert.equal(await service.hasOpenOwnedSessions(),false);
+  assert.equal((await service.listSessions()).length,1);
+ });
+});

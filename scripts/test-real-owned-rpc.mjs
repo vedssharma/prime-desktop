@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';
+import { normalizeMessages, parseSavedTranscript } from '../dist-electron/prime.js';
 
 const binary = process.argv[2];
 if (!binary) throw Error('Usage: node scripts/test-real-owned-rpc.mjs /absolute/prime-agent [report.json]');
@@ -130,6 +131,8 @@ try {
   assert.equal((await forkChannel.request({type:'get_messages'})).data.messages[0].content[0].text,'Private lifecycle fixture');
   assert.equal((await peerChannel.request({type:'new_session',activeSessionId:forkResponse.data.sessionId})).success,false);
   assert.deepEqual(await readFile(state.sessionFile),sourceBytes);
+  assert.deepEqual(normalizeMessages(parseSavedTranscript(await readFile(forkResponse.data.sessionFile,'utf8'))), normalizeMessages(parseSavedTranscript(sourceBytes.toString('utf8'))));
+  report.copiedHistoryMatches = true;
   const resumed = launch('rpc', ['--resume', state.sessionFile]);
   const resumeChannel = channel(resumed.stdout, resumed.stdin);
   const resumeResponse = await resumeChannel.request({type:'get_state'});
