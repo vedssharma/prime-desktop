@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type FormEvent
 import { ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, CircleHelp, Code2, Copy, Folder, Download, FolderOpen, GitBranch, PanelRight, LoaderCircle, Menu, MessageSquare, MoreHorizontal, PanelLeftClose, Plus, RefreshCw, Search, Sparkles, Square, Settings, Terminal, Trash2, X, Pencil, Pin, PinOff, Tag, Zap } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { ConnectionStatus, Message, ModelOption, Session } from '../shared/types';
+import type { ConnectionStatus, Message, ModelOption, Session, ImageAttachment } from '../shared/types';
 import './styles.css';
 import { loadPreferences, savePreferences } from './preferences';
 import AppearanceSettings from './AppearanceSettings';
@@ -21,6 +21,9 @@ import CommandPalette from './CommandPalette';
 import type { Command } from './commands';
 import { allTags, groupSessions, loadSessionMeta, normalizeTags, saveSessionMeta, setTags, togglePin, MAX_TAGS, MAX_TAG_LENGTH, type SessionMeta } from './sessionMeta';
 import { languageFor, tokenize } from './highlight';
+import { ImagePicker, DraftImages, MessageImages } from './ImageAttachments';
+import { readImageFiles, sameImages, type DraftImage } from './attachments';
+import { validateImages, promptCommand } from '../electron/attachments';
 import { errorText, folderName, toolPreview, messageTime, relativeTime } from './format';
 
 const isElectron = navigator.userAgent.includes('Electron');
@@ -51,19 +54,19 @@ const markdownComponents: Components = {
     return <code className={className}>{tokenize(children, language).map((token, index) => token.kind === 'plain' ? token.text : <span key={index} className={`tok-${token.kind}`}>{token.text}</span>)}</code>;
   },
 };
-function ToolCall({ step }: { step: Message }) { return <details className="tool-message"><summary><Terminal size={14} /><span>{step.toolName || 'Tool call'}</span><span className="tool-preview">{toolPreview(step.content)}</span><ChevronRight size={14} /></summary><pre>{step.content || 'No output'}</pre></details>; }
+function ToolCall({ step }: { step: Message }) { return <details className="tool-message"><summary><Terminal size={14} /><span>{step.toolName || 'Tool call'}</span><span className="tool-preview">{toolPreview(step.content)}</span><ChevronRight size={14} /></summary><pre>{step.content || (step.images?.length ? '' : 'No output')}</pre><MessageImages images={step.images} /></details>; }
 const MessageView = memo(function MessageView({ message, animate = false }: { message: Message; animate?: boolean }) {
   const [copied, setCopied] = useState(false);
   const revealed = useRevealedText(message.content, animate && message.role === 'assistant');
   const [copyError, setCopyError] = useState('');
   if (message.role === 'tool') return <ToolCall step={message} />;
-  if (message.role === 'system') return <div className="system-message"><CircleHelp size={14} /><span>{message.content}</span></div>;
-  return <article className={`message ${message.role}`}><div className={`message-avatar ${message.role === 'assistant' ? 'agent-avatar' : ''}`}>{message.role === 'assistant' ? <DockMark /> : 'Y'}</div><div className="message-body"><div className="message-meta"><strong>{message.role === 'assistant' ? 'Prime' : 'You'}</strong>{message.role === 'assistant' && <span className="agent-label">AGENT</span>}{message.timestamp && <time dateTime={message.timestamp} title={new Date(message.timestamp).toLocaleString()}>{messageTime(message.timestamp)}</time>}</div><div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{revealed}</ReactMarkdown></div>{message.role === 'assistant' && <button className="copy-message icon-button" aria-label={copied ? 'Response copied' : 'Copy response'} title="Copy response" onClick={() => { setCopyError(''); void window.prime.copyText(message.content).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(error => setCopyError(`Copy failed: ${errorText(error)}`)); }}>{copied ? <Check size={14} /> : <Copy size={14} />}</button>}{copyError && <p role="alert">{copyError}</p>}</div></article>;
-}, (a, b) => a.message.id === b.message.id && a.message.content === b.message.content && a.message.role === b.message.role && a.message.timestamp === b.message.timestamp && a.message.toolName === b.message.toolName);
+  if (message.role === 'system') return <div className="system-message"><CircleHelp size={14} /><span>{message.content}</span><MessageImages images={message.images} /></div>;
+  return <article className={`message ${message.role}`}><div className={`message-avatar ${message.role === 'assistant' ? 'agent-avatar' : ''}`}>{message.role === 'assistant' ? <DockMark /> : 'Y'}</div><div className="message-body"><div className="message-meta"><strong>{message.role === 'assistant' ? 'Prime' : 'You'}</strong>{message.role === 'assistant' && <span className="agent-label">AGENT</span>}{message.timestamp && <time dateTime={message.timestamp} title={new Date(message.timestamp).toLocaleString()}>{messageTime(message.timestamp)}</time>}</div><div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{revealed}</ReactMarkdown></div><MessageImages images={message.images} />{message.role === 'assistant' && <button className="copy-message icon-button" aria-label={copied ? 'Response copied' : 'Copy response'} title="Copy response" onClick={() => { setCopyError(''); void window.prime.copyText(message.content).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(error => setCopyError(`Copy failed: ${errorText(error)}`)); }}>{copied ? <Check size={14} /> : <Copy size={14} />}</button>}{copyError && <p role="alert">{copyError}</p>}</div></article>;
+}, (a, b) => a.message.id === b.message.id && a.message.content === b.message.content && a.message.role === b.message.role && a.message.timestamp === b.message.timestamp && a.message.toolName === b.message.toolName && sameImages(a.message.images, b.message.images));
 const TraceView = memo(function TraceView({ steps, active }: { steps: Message[]; active: boolean }) {
   const calls = steps.filter(step => step.role === 'tool').length;
   const label = `${calls} tool ${calls === 1 ? 'call' : 'calls'}`;
-  return <details className="trace"><summary>{active ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}<span className="trace-title">{active ? 'Working' : 'Thought process'}</span><span className="trace-count">{label}</span><ChevronRight size={14} /></summary><div className="trace-steps">{steps.map(step => step.role === 'tool' ? <ToolCall key={step.id} step={step} /> : step.role === 'system' ? <div key={step.id} className="system-message"><CircleHelp size={14} /><span>{step.content}</span></div> : <div key={step.id} className="trace-note markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{step.content}</ReactMarkdown></div>)}</div></details>;
+  return <details className="trace"><summary>{active ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}<span className="trace-title">{active ? 'Working' : 'Thought process'}</span><span className="trace-count">{label}</span><ChevronRight size={14} /></summary><div className="trace-steps">{steps.map(step => step.role === 'tool' ? <ToolCall key={step.id} step={step} /> : step.role === 'system' ? <div key={step.id} className="system-message"><CircleHelp size={14} /><span>{step.content}</span></div> : <div key={step.id} className="trace-note markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{step.content}</ReactMarkdown><MessageImages images={step.images} /></div>)}</div></details>;
 }, (a, b) => a.active === b.active && a.steps.length === b.steps.length && a.steps.every((step, i) => step.id === b.steps[i].id && step.content === b.steps[i].content && step.toolName === b.steps[i].toolName));
 
 export default function App() {
@@ -77,14 +80,18 @@ export default function App() {
   const [visibleMessages, setVisibleMessages] = useState(100);
   const [search, setSearch] = useState('');
   const [preferences] = useState(loadPreferences);
-  const [drafts, setDrafts] = useState<Record<string, { text: string; revision: number }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { text: string; images: DraftImage[]; revision: number; attachmentError?: string }>>({});
   const draftKey = activeId ?? 'new-session';
   const draftEntry = drafts[draftKey];
   const draft = draftEntry?.text ?? '';
-  const setDraft = (text: string) => setDrafts(previous => ({ ...previous, [draftKey]: { text, revision: (previous[draftKey]?.revision ?? 0) + 1 } }));
+  const draftImages = draftEntry?.images ?? [];
+  const [readingImages, setReadingImages] = useState<Record<string, boolean>>({});
+  const readingKeys = useRef(new Set<string>());
+  const reading = !!readingImages[draftKey];
+  const setDraft = (text: string) => setDrafts(previous => ({ ...previous, [draftKey]: { ...previous[draftKey], text, images: previous[draftKey]?.images ?? [], revision: (previous[draftKey]?.revision ?? 0) + 1 } }));
   const clearSubmittedDraft = (key: string, revision: number | undefined) => setDrafts(previous => {
     if (previous[key]?.revision !== revision) return previous;
-    return { ...previous, [key]: { text: '', revision: (revision ?? 0) + 1 } };
+    return { ...previous, [key]: { text: '', images: [], revision: (revision ?? 0) + 1 } };
   });
   const [cwd, setCwd] = useState(preferences.cwd);
   const [model, setModel] = useState(preferences.model);
@@ -165,6 +172,8 @@ export default function App() {
   const readOnly = active ? active.ownership === 'desktop' ? !active.writable : connection?.readOnly === true : connection?.readOnly === true && !connection?.canCreateOwned;
   const readyToSend = !!connection?.connected || !!connection?.canCreateOwned || active?.writable === true;
   const requiresConsent = !activeId && connection?.canCreateOwned === true;
+  const canAttach = active ? active.ownership === 'desktop' && active.writable === true && active.supportsImages !== false : connection?.canCreateOwned === true;
+  const attachmentReason = active?.supportsImages === false ? 'Choose an image-capable model to attach images.' : 'Images are available in writable desktop-owned sessions.';
   const runningRef = useRef(running); runningRef.current = running;
   const conversationItems = groupConversation(messages.slice(-visibleMessages));
   const currentCwd = active?.cwd || cwd;
@@ -319,10 +328,43 @@ export default function App() {
     catch (err) { setError(errorText(err)); } finally { setConnecting(false); }
   }
   async function chooseFolder() { try { const folder = await window.prime.chooseDirectory(); if (folder) setCwd(folder); } catch (err) { setError(errorText(err)); } }
+  async function addImages(files: File[]) {
+    if (!canAttach || readingKeys.current.has(draftKey)) return;
+    const key = draftKey;
+    readingKeys.current.add(key);
+    setReadingImages(previous => ({ ...previous, [key]: true }));
+    try {
+      const additions = await readImageFiles(files);
+      // A picker can finish after a session switch or text edit. Merge only into its original draft.
+      setDrafts(previous => {
+        const entry = previous[key] ?? { text: '', images: [], revision: 0 };
+        try {
+          const images = [...entry.images, ...additions];
+          validateImages(images);
+          return { ...previous, [key]: { ...entry, images, attachmentError: '', revision: entry.revision + 1 } };
+        } catch (error) { return { ...previous, [key]: { ...entry, attachmentError: errorText(error) } }; }
+      });
+    } catch (error) {
+      setDrafts(previous => ({ ...previous, [key]: { ...(previous[key] ?? {text:'', images:[], revision:0}), attachmentError: errorText(error) } }));
+    } finally {
+      readingKeys.current.delete(key);
+      setReadingImages(previous => ({ ...previous, [key]: false }));
+    }
+  }
+  function removeImage(id: string) {
+    setDrafts(previous => {
+      const entry = previous[draftKey];
+      if (!entry) return previous;
+      return { ...previous, [draftKey]: { ...entry, images: entry.images.filter(image => image.id !== id), attachmentError: '', revision: entry.revision + 1 } };
+    });
+  }
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     const text = draft.trim();
-    if (readOnly || dialogRef.current || !text || pendingKeys.current.has(draftKey) || !readyToSend || (!activeId && !cwd) || (requiresConsent && !allowFileChanges)) return;
+    if (readOnly || dialogRef.current || (!text && !draftImages.length) || readingKeys.current.has(draftKey) || pendingKeys.current.has(draftKey) || !readyToSend || (!activeId && !cwd) || (requiresConsent && !allowFileChanges)) return;
+    let images: ImageAttachment[] | undefined;
+    try { images = promptCommand(text, draftImages).images; }
+    catch (error) { setError(errorText(error)); return; }
     const target = activeId;
     const submittedKey = draftKey;
     const submittedRevision = draftEntry?.revision;
@@ -332,7 +374,7 @@ export default function App() {
     let accepted = false;
     try {
       if (target) {
-        await window.prime.sendMessage(target, text);
+        await window.prime.sendMessage(target, text, ...(images?.length ? [images] : []));
         accepted = true;
         clearSubmittedDraft(submittedKey, submittedRevision);
         setNotices(previous => ({ ...previous, [submittedKey]: queued ? 'Follow-up queued. Prime will pick it up after the current work finishes.' : 'Message accepted.' }));
@@ -341,7 +383,7 @@ export default function App() {
           await readMessages(target);
         }
       } else {
-        const created = await window.prime.createSession({ prompt: text, cwd, ...(model ? { model } : {}), ...(requiresConsent ? { allowFileChanges } : {}) });
+        const created = await window.prime.createSession({ prompt: text, cwd, ...(images?.length ? { images } : {}), ...(model ? { model } : {}), ...(requiresConsent ? { allowFileChanges } : {}) });
         accepted = true;
         clearSubmittedDraft(submittedKey, submittedRevision);
         setSessions(previous => [created, ...previous.filter(session => session.id !== created.id)]);
@@ -422,7 +464,7 @@ export default function App() {
         {!activeId ? <div className="welcome"><div className="welcome-eyebrow"><span className="eyebrow-line" /> A LITTLE DIRECTION. ENDLESS POSSIBILITY.</div><div className="hero-mark"><DockMark /><span className="hero-spark"><Sparkles size={15} /></span></div><h1>Good ideas deserve<br />a <span>head start.</span></h1><p className="welcome-description">Meet your coding partner. Build, explore, and solve<br className="desktop-break" /> together, right from your workspace.</p><div className="starter-heading"><span>WHERE SHOULD WE START?</span><span>Pick a direction, or make your own<ArrowDown size={12} /></span></div><div className="starter-grid">{starters.map(({ icon: Icon, title, description, prompt }) => <button key={title} className="starter-card" onClick={() => { setDraft(prompt); textarea.current?.focus(); }}><div className="starter-icon"><Icon size={20} /><ArrowRight size={15} /></div><strong>{title}</strong><span>{description}</span></button>)}</div><div className="welcome-note"><FolderOpen size={14} /><span>Start in a project folder. Prime takes it from there.</span></div><p className="safety-note">Agents run with your user permissions. No sandbox.</p></div> : <div className="conversation" ref={conversationRef}>{loadingMessages ? <div className="messages-loading"><LoaderCircle size={18} className="spin" />Loading conversation...</div> : messages.length ? <>{messages.length > visibleMessages && <button className="secondary-button" onClick={() => { setFollow(false); setVisibleMessages(count => count + 100); }}>Load earlier messages ({messages.length - visibleMessages})</button>}{conversationItems.map((item, index) => item.kind === 'trace' ? <TraceView key={item.id} steps={item.steps} active={running && index === conversationItems.length - 1} /> : <MessageView key={item.message.id} message={item.message} animate={!!knownIds.current && !knownIds.current.has(item.message.id)} />)}</> : <div className="conversation-empty"><MessageSquare size={26} /><h2>The next step is yours.</h2><p>Send a message to continue this session.</p></div>}{running && <div className="working-indicator" role="status"><DockMark /><span>Prime is working<span className="thinking-dots"><i /><i /><i /></span></span></div>}{active?.status === 'error' && <div className="system-message"><CircleHelp size={15} />This session stopped with an error. Check its history before retrying. Closed or uncertain desktop sessions cannot accept new prompts.</div>}</div>}
         {activeId && showJump && <div className="jump-latest-anchor"><button type="button" className="jump-latest" onClick={() => { setFollow(true); if (scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }}><ArrowDown size={13} />Jump to latest</button></div>}
       </div>
-      <div className={`composer-area ${!activeId ? 'welcome-composer' : ''}`}>{requiresConsent && <label className="workspace-consent"><input type="checkbox" checked={allowFileChanges} onChange={event => setAllowFileChanges(event.target.checked)} />I trust this workspace. Prime may run tools and change files with my user permissions. This is not a sandbox.</label>}<form className={`composer ${pending ? 'is-pending' : ''}`} onSubmit={submit}><label className="sr-only" htmlFor="prompt">Message Prime</label><textarea id="prompt" ref={textarea} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} placeholder={running ? 'Queue a follow-up for after this work...' : activeId ? 'What’s next? Ask Prime anything...' : 'What would you like to work on?'} rows={2} /><div className="composer-toolbar"><div className="composer-controls"><button type="button" className="folder-control" onClick={() => { if (active) void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))); else void chooseFolder(); }} title={currentCwd || 'Choose project folder'}><Folder size={14} /><span>{folderName(currentCwd)}</span>{!active && <ChevronDown size={12} />}</button><span className="control-divider" />{!active && <input className="model-search" aria-label="Search models" placeholder="Find model…" value={modelSearch} onChange={event => setModelSearch(event.target.value)} />}<label className="model-control"><Zap size={13} /><span className="sr-only">Model</span><select aria-label="Model" value={active ? active.model || '' : model} disabled={!!active && (!active.writable || running || pending)} onChange={event => void changeModel(event.target.value)}><option value="">CLI default</option>{!active && model && !models.some(choice => choice.id === model) && <option value={model}>{model} (saved selection)</option>}{active?.model && !models.some(choice => choice.id === active.model) && <option value={active.model}>{active.model}</option>}{models.filter(choice => active || choice.id === model || `${choice.id} ${choice.name}`.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}</select>{!active && <ChevronDown size={11} />}</label></div><div className="send-controls">{pending && <span className="sending-label">Sending...</span>}{running && <button type="button" className="send-button stop-button" aria-label="Stop generation" title="Stop generation" onClick={stop} disabled={pending || readOnly || !readyToSend}><Square size={13} fill="currentColor" /></button>}<button className="send-button" type="submit" aria-label={running ? 'Queue follow-up' : 'Send message'} title={running ? 'Queue for after current work (Enter)' : 'Send message (Enter)'} disabled={readOnly || !draft.trim() || pending || !readyToSend || (!active && !cwd) || (requiresConsent && !allowFileChanges)}>{pending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={19} />}</button></div></div></form><div className="composer-caption"><span role="status" title={notice}><span className="privacy-dot" />{notice || (running ? 'Follow-ups wait until current work finishes.' : 'Drafts stay in memory, not on disk.')}</span><span><kbd>↵</kbd> {running ? 'to queue' : 'to send'} <span className="caption-dot">·</span> <kbd>shift ↵</kbd> for a new line</span></div></div>
+      <div className={`composer-area ${!activeId ? 'welcome-composer' : ''}`}>{requiresConsent && <label className="workspace-consent"><input type="checkbox" checked={allowFileChanges} onChange={event => setAllowFileChanges(event.target.checked)} />I trust this workspace. Prime may run tools and change files with my user permissions. This is not a sandbox.</label>}<form className={`composer ${pending ? 'is-pending' : ''}`} onSubmit={submit}><DraftImages images={draftImages} onRemove={removeImage} />{draftEntry?.attachmentError && <p className="attachment-error" role="alert">{draftEntry.attachmentError}</p>}<label className="sr-only" htmlFor="prompt">Message Prime</label><textarea id="prompt" ref={textarea} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} placeholder={running ? 'Queue a follow-up for after this work...' : activeId ? 'What’s next? Ask Prime anything...' : 'What would you like to work on?'} rows={2} /><div className="composer-toolbar"><div className="composer-controls"><ImagePicker disabled={!canAttach || pending} busy={reading} reason={attachmentReason} onFiles={files => void addImages(files)} /><button type="button" className="folder-control" onClick={() => { if (active) void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))); else void chooseFolder(); }} title={currentCwd || 'Choose project folder'}><Folder size={14} /><span>{folderName(currentCwd)}</span>{!active && <ChevronDown size={12} />}</button><span className="control-divider" />{!active && <input className="model-search" aria-label="Search models" placeholder="Find model…" value={modelSearch} onChange={event => setModelSearch(event.target.value)} />}<label className="model-control"><Zap size={13} /><span className="sr-only">Model</span><select aria-label="Model" value={active ? active.model || '' : model} disabled={!!active && (!active.writable || running || pending)} onChange={event => void changeModel(event.target.value)}><option value="">CLI default</option>{!active && model && !models.some(choice => choice.id === model) && <option value={model}>{model} (saved selection)</option>}{active?.model && !models.some(choice => choice.id === active.model) && <option value={active.model}>{active.model}</option>}{models.filter(choice => active || choice.id === model || `${choice.id} ${choice.name}`.toLowerCase().includes(modelSearch.toLowerCase())).map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}</select>{!active && <ChevronDown size={11} />}</label></div><div className="send-controls">{pending && <span className="sending-label">Sending...</span>}{running && <button type="button" className="send-button stop-button" aria-label="Stop generation" title="Stop generation" onClick={stop} disabled={pending || readOnly || !readyToSend}><Square size={13} fill="currentColor" /></button>}<button className="send-button" type="submit" aria-label={running ? 'Queue follow-up' : 'Send message'} title={running ? 'Queue for after current work (Enter)' : 'Send message (Enter)'} disabled={readOnly || (!draft.trim() && !draftImages.length) || pending || reading || !readyToSend || (!active && !cwd) || (requiresConsent && !allowFileChanges)}>{pending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={19} />}</button></div></div></form><div className="composer-caption"><span role="status" title={notice}><span className="privacy-dot" />{notice || (running ? 'Follow-ups wait until current work finishes.' : 'Drafts stay in memory, not on disk.')}</span><span><kbd>↵</kbd> {running ? 'to queue' : 'to send'} <span className="caption-dot">·</span> <kbd>shift ↵</kbd> for a new line</span></div></div>
       <footer className="main-footer"><span>MADE FOR YOUR NEXT BIG THING.</span><span>Build with intention.<DockMark /></span></footer>
     </main>
     {active && workspaceOpen && <div className="workspace-slot" inert={!!dialog}><WorkspacePanel sessionId={active.id} cwd={active.cwd} running={running} canEdit={active.ownership === 'desktop'} onClose={() => setWorkspaceOpen(false)} /></div>}
