@@ -1,11 +1,12 @@
 // Opt-in native ownership check. No prompt is sent and no credentials are inherited.
 import { spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
-import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile, appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';
+import { normalizeMessages, parseSavedTranscript } from '../dist-electron/prime.js';
 
 const binary = process.argv[2];
 if (!binary) throw Error('Usage: node scripts/test-real-owned-rpc.mjs /absolute/prime-agent [report.json]');
@@ -21,8 +22,8 @@ const common = ['--cwd', directory, '--daemon-socket', socketPath, '--session-di
   '--offline', '--no-extensions', '--no-tools', '--no-skills', '--no-context-files', '--no-prompt-templates', '--no-themes',
   '--model', 'anthropic/claude-haiku-4-5'];
 const children = [];
-function launch(mode) {
-  const child = spawn(binary, ['--mode', mode, ...common], { env, cwd: directory, stdio: 'pipe' });
+function launch(mode, extra = []) {
+  const child = spawn(binary, ['--mode', mode, ...common, ...extra], { env, cwd: directory, stdio: 'pipe' });
   child.done = once(child, 'close');
   child.stderrText = '';
   child.stderr.on('data', data => { child.stderrText = (child.stderrText + data.toString()).slice(-10000); });
@@ -63,7 +64,8 @@ try {
   const versionProcess = spawn(binary, ['--version'], { env, cwd: directory, stdio: ['ignore', 'pipe', 'pipe'] });
   versionProcess.done = once(versionProcess, 'close'); children.push(versionProcess);
   let versionText = ''; versionProcess.stdout.on('data', chunk => { versionText += chunk.toString(); });
-  versionProcess.stderr.resume();
+  // Source-built CLI versions can route --version to stderr in offline mode.
+  versionProcess.stderr.on('data', chunk => { versionText += chunk.toString(); });
   await deadline(versionProcess.done, 10000, 'Version check timed out');
   report.version = versionText.trim();
   assert.equal(report.version, '0.9.6', 'This ownership probe is pinned to the reviewed version');
@@ -116,6 +118,48 @@ try {
   report.workerRemoved = true;
   try { const data = await readFile(state.sessionFile, 'utf8'); report.savedHeaderId = JSON.parse(data.split('\n')[0]).id; }
   catch (error) { if (error.code === 'ENOENT') report.fileNotYetWrittenWithoutPrompt = true; else throw error; }
+  // Exercise explicit startup resume/fork on private synthetic history, never a provider prompt.
+  await appendFile(state.sessionFile, JSON.stringify({type:'message', id:'probe-entry', parentId:null, timestamp:new Date().toISOString(), message:{role:'user',content:[{type:'text',text:'Private lifecycle fixture'}],timestamp:Date.now()}}) + '\n');
+  const sourceBytes = await readFile(state.sessionFile);
+  const forked = launch('rpc', ['--fork', state.sessionFile]);
+  const forkChannel = channel(forked.stdout, forked.stdin);
+  const forkResponse = await forkChannel.request({type:'get_state'});
+  assert.equal(forkResponse.success,true,JSON.stringify(forkResponse));
+  assert.notEqual(forkResponse.data.sessionId,state.sessionId);
+  assert.notEqual(forkResponse.data.sessionFile,state.sessionFile);
+  assert.equal(forkResponse.data.sessionFile.startsWith(sessions+'/'),true);
+  assert.equal((await forkChannel.request({type:'get_messages'})).data.messages[0].content[0].text,'Private lifecycle fixture');
+  assert.equal((await peerChannel.request({type:'new_session',activeSessionId:forkResponse.data.sessionId})).success,false);
+  assert.deepEqual(await readFile(state.sessionFile),sourceBytes);
+  assert.deepEqual(normalizeMessages(parseSavedTranscript(await readFile(forkResponse.data.sessionFile,'utf8'))), normalizeMessages(parseSavedTranscript(sourceBytes.toString('utf8'))));
+  report.copiedHistoryMatches = true;
+  const resumed = launch('rpc', ['--resume', state.sessionFile]);
+  const resumeChannel = channel(resumed.stdout, resumed.stdin);
+  const resumeResponse = await resumeChannel.request({type:'get_state'});
+  assert.equal(resumeResponse.success, true, JSON.stringify(resumeResponse));
+  assert.equal(resumeResponse.data.sessionId, state.sessionId);
+  assert.equal(resumeResponse.data.sessionFile, state.sessionFile);
+  assert.equal((await resumeChannel.request({type:'get_messages'})).data.messages[0].content[0].text,'Private lifecycle fixture');
+  const resumeDenied = await peerChannel.request({type:'new_session',activeSessionId:state.sessionId});
+  assert.equal(resumeDenied.success,false);
+  report.explicitResumeOwned = true;
+  assert.equal((await resumeChannel.request({type:'get_state'})).data.sessionId,state.sessionId);
+  report.startupForkHasSeparateIdentity = true;
+  // A second resume must surface a lease/ownership conflict, never attach to the live owner.
+  const conflict = launch('rpc', ['--resume', state.sessionFile]);
+  conflict.stdout.resume();
+  const [conflictExit] = await deadline(conflict.done,20000,'Concurrent resume did not reject');
+  assert.notEqual(conflictExit,0);
+  assert.match(conflict.stderrText,/already|owned|lease|active/i);
+  report.concurrentResumeRejected = true;
+  for (const child of [forked,resumed]) {
+    child.stdin.end();
+    const [code] = await deadline(child.done,20000,'Lifecycle RPC EOF did not exit');
+    assert.equal(code,0,child.stderrText);
+  }
+  const forkHeader = JSON.parse((await readFile(forkResponse.data.sessionFile,'utf8')).split('\n')[0]);
+  assert.equal(forkHeader.parentSession,state.sessionFile);
+  report.forkParentPreserved = true;
   console.log(JSON.stringify(report, null, 2));
   if (process.argv[3]) await writeFile(process.argv[3], JSON.stringify(report, null, 2) + '\n');
 } catch (error) {

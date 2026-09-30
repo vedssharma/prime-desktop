@@ -33,7 +33,7 @@ handling. Direct saves need external-change detection and recoverable backups.
 Git diff/review is not a sandbox or a guarantee that arbitrary agent tools stay in
 one directory. Show these limits accurately.
 
-## Step 5 — queue and harness features (usage and compaction implemented)
+## Step 5 — queue and harness features (usage, compaction, image attachments and saved-history startup implemented)
 
 Expose only documented operations safe within the verified owned-session boundary.
 Queue previews without IDs/versioning cannot promise conflict-free editing.
@@ -46,21 +46,35 @@ Implemented for desktop-owned sessions (RPC per upstream `docs/rpc.md`, v0.9.6):
   "not yet estimated", never as zero.
 - **Compaction:** `compact` runs only while the session is idle (no streaming,
   compaction, unfinished or queued work), with a 5-minute timeout and optional
-  custom instructions (the UI currently sends none). It rewrites the agent's working
+  custom instructions supplied through the usage panel (up to 16 KiB). It rewrites the agent's working
   context inside the same persistent session and keeps the identity. An uncertain
   outcome closes the pipe and is never resent.
 
+- **Image attachments:** new prompts and follow-ups accept up to four PNG/JPEG/WebP
+  images, totaling at most 384 KiB decoded. The picker rejects corrupt files and images
+  over 16 megapixels or 8192 pixels on either side. Resize larger images externally.
+  Draft images remain in memory per session, clear only on unchanged-draft admission,
+  and survive rejection or late responses. The main process revalidates MIME/signatures,
+  base64, aggregate size and the complete escaped UTF-8 RPC frame (1 MiB including ID/LF).
+  Current owned model metadata must explicitly include image input before admission.
+  Live/saved transcripts and JSON/Markdown exports retain supported image blocks.
+  Unsupported/oversized historical images display an unavailable notice.
+  Native Electron tests use disposable image fixtures and make no model request.
+
+- **Saved-history fork / resume:** explicit startup `--fork <file>` creates a
+  separate owned process, persistent identity, transcript and desktop metadata record.
+  `--resume <file>` binds a new owned pipe to the exact expected saved identity.
+  Both accept only closed desktop-owned history, require renewed workspace trust,
+  validate the stored header/workspace/path, and reject duplicate openings or upstream
+  lease conflicts. No prompt is sent automatically; no navigation RPC is enabled.
+  Native no-prompt coverage on pinned v0.9.6 verifies peer denial, separate fork identity,
+  parent history, exact resume identity and rejection of concurrent resume. Native
+  Electron fixture tests cover the dialogs, IPC and independent follow-ups.
+
 Still open, each needing its own design and native integration coverage:
 
-- **Fork / clone:** `fork`, `clone` and `switch_session` re-point the RPC process at a
-  different session file. That is exactly the identity change the owned-session guard
-  treats as a fault and freezes on. Supporting it means a new model where a fork is a
-  new desktop-owned session (new process, new metadata record) rather than a mutation
-  of the current one, plus a decision about which entry IDs the UI may offer.
-- **Attachments:** `prompt` accepts base64 `images` (`{type, data, mimeType}`). Needs a
-  picker with type/size limits, a check that the selected model supports images,
-  rendering of image content in transcripts, and a total-request bound below the
-  1 MiB RPC frame limit (`electron/rpc-client.ts`), which likely means downscaling
-  or rejecting large images.
+- **Fork from an earlier message:** selecting individual entry IDs and safely making
+  a partial-history fork is not implemented. Current startup fork copies saved history.
+
 - **Queue editing:** unchanged; the count is shown, but message text and cancellation
   are not available without IDs/versioning.

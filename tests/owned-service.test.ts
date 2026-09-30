@@ -100,7 +100,7 @@ async function ownedFixture(run:(service:PrimeService,dir:string)=>Promise<void>
 test('owned creation rejects slash or blank prompts and non-directory workspaces before launching', async () => {
  await ownedFixture(async (service,dir)=>{
   const file=join(dir,'file.txt');await writeFile(file,'');
-  for(const prompt of ['   ','/new','  /resume x']) await assert.rejects(service.createSession({cwd:dir,prompt,allowFileChanges:true}),/plain-language prompt/,prompt);
+  for(const prompt of ['   ','/new','  /resume x']) await assert.rejects(service.createSession({cwd:dir,prompt,allowFileChanges:true}),/message or attach|Slash commands/,prompt);
   for(const cwd of ['relative/dir',file]) await assert.rejects(service.createSession({cwd,prompt:'Hello',allowFileChanges:true}),/absolute workspace/,cwd);
   await assert.rejects(service.createSession({cwd:dir,prompt:'Hello',allowFileChanges:'yes' as any}),/Confirm/);
   assert.deepEqual(await service.listSessions(),[]);
@@ -168,4 +168,110 @@ test('desktop-owned usage and compaction go through the owned pipe only', async 
   await assert.rejects(service.compactSession(session.id),/closed/);
   assert(daemon.commands.every(command=>command.type==='list'));
  }finally{await service.close();await daemon.close();await rm(dir,{recursive:true,force:true});}
+});
+
+
+test('images travel through the owned subprocess and saved history, with model and shared-session guards', async () => {
+ await ownedFixture(async (service, dir) => {
+  const image = {type:'image' as const,mimeType:'image/png' as const,data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='};
+  const session = await service.createSession({cwd:dir,prompt:'',images:[image],allowFileChanges:true});
+  assert.equal(session.supportsImages,true);
+  assert.equal(session.title,'Image conversation');
+  assert.deepEqual((await service.getMessages(session.id))[0].images,[image]);
+  await service.sendMessage(session.id,'Follow-up',[image]);
+  assert.deepEqual((await service.getMessages(session.id))[1].images,[image]);
+  await service.setSessionModel(session.id,'fixture/text-only');
+  await assert.rejects(service.sendMessage(session.id,'No',[image]),/image support/);
+  await assert.rejects(service.sendMessage('shared','No',[image]),/Read-only compatibility/);
+  await service.closeOwnedSession(session.id);
+  assert.deepEqual((await service.getMessages(session.id))[0].images,[image]);
+  await assert.rejects(service.createSession({cwd:dir,prompt:'No',images:[image],model:'fixture/text-only',allowFileChanges:true}),/image support/);
+  assert.equal(await service.hasOpenOwnedSessions(),false);
+ });
+});
+
+test('explicit resume keeps identity and fork creates independent saved history without prompting', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const original=await service.createSession({cwd:dir,prompt:'Original history',allowFileChanges:true});
+  await assert.rejects(service.resumeOwnedSession(original.id,true),/Close/);
+  await assert.rejects(service.forkOwnedSession(original.id,true),/Close/);
+  await service.closeOwnedSession(original.id);
+  await assert.rejects(service.resumeOwnedSession(original.id,false),/trust/);
+  await assert.rejects(service.forkOwnedSession('shared',true),/Read-only/);
+  const fork=await service.forkOwnedSession(original.id,true);
+  assert.notEqual(fork.id,original.id);assert.equal(fork.writable,true);
+  assert.equal(fork.title,'Fork of Original history');
+  assert.equal((await service.getMessages(fork.id))[0].content,'Original history');
+  assert.equal((await service.listSessions()).find(session=>session.id===original.id)?.writable,false);
+  await service.sendMessage(fork.id,'Only in the fork');
+  assert.equal((await service.getMessages(original.id))[0].content,'Original history');
+  const resumed=await service.resumeOwnedSession(original.id,true);
+  assert.equal(resumed.id,original.id);assert.equal(resumed.writable,true);
+  assert.equal((await service.getMessages(original.id))[0].content,'Original history');
+  await service.sendMessage(original.id,'Resumed follow-up');
+  assert.equal((await service.getMessages(fork.id)).at(-1)?.content,'Only in the fork');
+ });
+});
+
+test('saved-history startup rejects tampering, symlinks and simultaneous opens without takeover', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const original=await service.createSession({cwd:dir,prompt:'Original',allowFileChanges:true});
+  await service.closeOwnedSession(original.id);
+  const metadataFile=join(dir,'desktop',original.id+'.json');
+  const metadata=JSON.parse(await readFile(metadataFile,'utf8'));
+  const bytes=await readFile(metadata.sessionFile,'utf8');
+  await writeFile(metadata.sessionFile,bytes.replace(metadata.sessionId,'another-id'));
+  await assert.rejects(service.resumeOwnedSession(original.id,true),/identity mismatch/);
+  await writeFile(metadata.sessionFile,bytes);
+  const pending=service.resumeOwnedSession(original.id,true);
+  await assert.rejects(service.resumeOwnedSession(original.id,true),/already opening/);
+  await pending;await service.closeOwnedSession(original.id);
+  const {symlink,unlink}=await import('node:fs/promises');
+  const outside=join(dir,'outside.jsonl');await writeFile(outside,bytes);
+  await unlink(metadata.sessionFile);await symlink(outside,metadata.sessionFile);
+  await assert.rejects(service.forkOwnedSession(original.id,true),/regular file/);
+  assert.equal(await service.hasOpenOwnedSessions(),false);
+ });
+});
+
+test('saved history must match its original workspace and contain a single valid header', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const original=await service.createSession({cwd:dir,prompt:'Original',allowFileChanges:true});
+  await service.closeOwnedSession(original.id);
+  const metadata=JSON.parse(await readFile(join(dir,'desktop',original.id+'.json'),'utf8'));
+  const bytes=await readFile(metadata.sessionFile,'utf8');
+  const other=join(dir,'other');await mkdir(other);
+  const header=JSON.parse(bytes.split('\n')[0]);
+  await writeFile(metadata.sessionFile,JSON.stringify({...header,cwd:other})+'\n'+bytes.split('\n').slice(1).join('\n'));
+  await assert.rejects(service.resumeOwnedSession(original.id,true),/workspace mismatch/);
+  await writeFile(metadata.sessionFile,bytes+JSON.stringify(header)+'\n');
+  await assert.rejects(service.forkOwnedSession(original.id,true),/Multiple session headers/);
+  await writeFile(metadata.sessionFile,bytes+'broken\n');
+  await assert.rejects(service.resumeOwnedSession(original.id,true),/invalid JSON/);
+  assert.equal(await service.hasOpenOwnedSessions(),false);
+ });
+});
+
+test('shutdown waits for saved-history startup and leaves no owned process running', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const original=await service.createSession({cwd:dir,prompt:'Original',allowFileChanges:true});
+  await service.closeOwnedSession(original.id);
+  const opening=service.resumeOwnedSession(original.id,true);
+  const rejection=assert.rejects(opening,/closing|closed/);
+  await service.close();await rejection;
+  assert.equal(await service.hasOpenOwnedSessions(),false);
+ });
+});
+
+test('fork verifies the copied history when the source changes during CLI startup', async () => {
+ await ownedFixture(async (service,dir)=>{
+  const original=await service.createSession({cwd:dir,prompt:'Original',allowFileChanges:true});
+  await service.closeOwnedSession(original.id);
+  const cli=join(dir,'prime-agent');
+  const code=await readFile(cli,'utf8');
+  await writeFile(cli,code.replace('const records = source ?', "if (process.argv.includes('--fork')) writeFileSync(source,readFileSync(source,'utf8').replace('Original','Replaced'));\nconst records = source ?"));
+  await assert.rejects(service.forkOwnedSession(original.id,true),/Fork history mismatch/);
+  assert.equal(await service.hasOpenOwnedSessions(),false);
+  assert.equal((await service.listSessions()).length,1);
+ });
 });

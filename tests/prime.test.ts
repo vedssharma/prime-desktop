@@ -115,7 +115,7 @@ test('message mapping formats shell runs, images, plain strings and generated id
   assert.deepEqual(messages, [
     { id: 'user-2024-01-02T03:04:05Z-0', role: 'user', content: 'Plain string', timestamp: '2024-01-02T03:04:05.000Z' },
     { id: 'bashExecution-1-1', role: 'tool', content: '$ ls -a\n.\n..', timestamp: undefined },
-    { id: 'img', role: 'user', content: 'Look\n[Image attachment]', timestamp: undefined },
+    { id: 'img', role: 'user', content: 'Look\n[Image attachment unavailable: unsupported type or size]', timestamp: undefined },
     { id: 'call-call-0', role: 'tool', toolName: 'read', timestamp: undefined, content: '{}' },
     { id: 'notice', role: 'system', content: 'Visible custom', timestamp: undefined },
     { id: 'err', role: 'tool', content: 'partial\n\nError: Denied', timestamp: undefined, toolName: 'write' },

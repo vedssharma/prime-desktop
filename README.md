@@ -49,7 +49,7 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 ## What it does
 
 - Create desktop-owned sessions in trusted workspaces using your existing CLI credentials.
-- Send prompts/follow-ups, view streamed output, stop work, and change the model when idle.
+- Send prompts/follow-ups, attach images, view streamed output, stop work, and change the model when idle.
 - Browse and search existing Prime Agent sessions without changing them.
 - Read conversations, Markdown responses, and tool output.
 - Copy responses through a validated native clipboard bridge.
@@ -62,7 +62,7 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 - Pin sessions, add local tags, filter by tag, and group the sidebar by date or workspace. Pins and tags are stored only in this app.
 - Command palette (Cmd/Ctrl+K) for actions and jumping between sessions.
 - Read-only workspace panel: Git changes with diffs, and a file browser with previews. Paths are confined to the session's folder, symlinks are not followed, and Git is run with external diff and fsmonitor hooks disabled. This is a viewer, not a sandbox for agent tools.
-- Preserve saved desktop history when a session closes. Closed sessions are read-only in this first owned-session release; automatic resume and deletion are not offered.
+- Preserve saved desktop history when a session closes. Closed sessions remain read-only until explicitly resumed with renewed workspace trust; deletion is not offered.
 
 ## Appearance
 
@@ -82,6 +82,35 @@ These are desktop-only settings and do not change the CLI's theme.
 Drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. Only the new-session workspace path, model choice, and appearance settings are stored locally.
 
 This workflow is enabled only for open desktop-owned sessions on the verified CLI version; shared and closed sessions are read-only. During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
+
+## Resume and fork saved history
+
+Close a desktop-owned session, select it in the sidebar, and open **Session actions**:
+
+- **Resume saved session** reopens the same saved conversation and workspace.
+- **Fork saved session** creates a separate conversation from the saved history in
+  the same workspace. The original stays closed.
+
+Both actions require renewed workspace trust and verified Prime Agent 0.9.6. Neither
+sends a prompt automatically. Shared CLI sessions cannot be resumed or forked by the
+desktop. A live desktop session must be closed first; opening an individual earlier
+message as a fork is not offered. Identity mismatches, unavailable workspaces, and
+ownership conflicts fail visibly without takeover or automatic retry.
+
+## Image attachments
+
+Use **Attach images** in a writable desktop-owned session or before creating one.
+PNG, JPEG, and WebP are supported: up to four images, totaling 384 KiB, at most
+16 megapixels and 8192 pixels on each side. Resize larger files before attaching.
+The selected model must report image support; new sessions check the actual CLI
+model before submitting the first prompt. Image-only prompts and queued follow-ups
+are supported. Remove thumbnails to discard attachments before sending.
+
+Unsent images stay in each draft's memory and disappear on reload. Accepted images
+become part of the CLI transcript and appear in saved history and conversation
+exports. Failed submissions keep the draft; late admission never clears newer edits.
+The complete message and images must fit the 1 MiB RPC request limit. Shared and
+closed sessions remain read-only. Remote Markdown images remain external links.
 
 ## Architecture
 
@@ -145,15 +174,16 @@ saved default may change too. Shared sessions cannot be switched from this app.
 - Extensions are disabled and slash commands/navigation/scheduling are not exposed.
 - App-owned transcripts live under the app's `owned-sessions/transcripts` directory;
   app display names are local metadata, not edits to shared CLI history.
-- Quitting closes owned processes and their work; closed history cannot yet be resumed.
+- Quitting closes owned processes and their work. Closed desktop history can be explicitly resumed or forked after renewed workspace trust.
 - Ambiguous admission or process loss is never retried automatically.
 - The workspace panel can edit existing UTF-8 text files (up to 512 KiB) in desktop-owned sessions only.
   A save is refused if the file changed on disk since you opened it (for example, the agent wrote to it),
   and the previous bytes are backed up under the app's `workspace-backups` folder (newest 200 kept).
   The check and write are not one atomic step. Creating, renaming and deleting files is not offered.
-- The queue shows the agent-reported follow-up count. Queued text, reordering and cancellation, fork,
-  compaction, usage and attachments still need documented RPC support and are future steps.
-- Resuming closed desktop sessions remains disabled by design (see `docs/owned-rpc-design.md`).
+- The queue shows the agent-reported follow-up count. Queued text, reordering and cancellation
+  need upstream IDs/versioning. Closed desktop history supports explicit startup fork and resume.
+  Usage, compaction and image attachments are implemented.
+- Fork/resume is restricted to closed desktop-owned history. Forking an individual earlier message and opening shared CLI sessions for writes remain unsupported (see `docs/owned-rpc-design.md`).
 
 `npm run test:electron` uses disposable simulated daemons/RPC processes, including a
 deterministic file write in a temporary workspace. It makes no LLM request.

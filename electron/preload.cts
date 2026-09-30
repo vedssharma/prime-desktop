@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { ImageAttachment } from './attachments.js';
 const invoke = (method: string, ...args: unknown[]) => ipcRenderer.invoke(`prime:${method}`, ...args);
 contextBridge.exposeInMainWorld('prime', Object.freeze({
   getConnectionConfig: () => invoke('getConnectionConfig'),
@@ -9,10 +10,12 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   listSessions: () => invoke('listSessions'),
   getMessages: (id: string) => invoke('getMessages', id),
   listModels: () => invoke('listModels'),
-  createSession: (input: { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean }) => invoke('createSession', input),
+  createSession: (input: { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[] }) => invoke('createSession', input),
   setSessionModel: (id: string, model: string) => invoke('setSessionModel', id, model),
   closeOwnedSession: (id: string) => invoke('closeOwnedSession', id),
-  sendMessage: (id: string, text: string) => invoke('sendMessage', id, text),
+  resumeOwnedSession: (id: string, allowFileChanges: boolean) => invoke('resumeOwnedSession', id, allowFileChanges),
+  forkOwnedSession: (id: string, allowFileChanges: boolean) => invoke('forkOwnedSession', id, allowFileChanges),
+  sendMessage: (id: string, text: string, images?: ImageAttachment[]) => invoke('sendMessage', id, text, images),
   interruptSession: (id: string) => invoke('interruptSession', id),
   getSessionUsage: (id: string) => invoke('getSessionUsage', id),
   compactSession: (id: string, instructions?: string) => invoke('compactSession', id, instructions),
