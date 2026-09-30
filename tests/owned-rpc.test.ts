@@ -290,3 +290,22 @@ test('image prompts require current model capability, preserve follow-up behavio
     assert.equal(rpc.commands.filter(({command}) => command.type === 'prompt').length, 2);
   });
 });
+
+test('startup resume binds the exact saved identity and startup forks require a new identity', async () => {
+  await fixture(async (original, rpc) => {
+    await writeFile(original.sessionFile,JSON.stringify({type:'session',id:original.id,cwd:original.cwd})+'\n');
+    for(const mode of ['resume','fork'] as const) {
+      for(const valid of [true,false]) {
+        const next=new FakeRpc(original.cwd);
+        if((mode==='fork')===valid) next.state={...next.state,sessionId:'fork-id',sessionFile:join(original.cwd,'fork.jsonl')};
+        let args:string[]=[];
+        const options={executable:'fake',cwd:original.cwd,sessionDir:original.cwd,source:{mode,sessionFile:original.sessionFile,sessionId:original.id}};
+        const factory=(launch:RpcLaunch)=>{args=launch.args;return next;};
+        if(valid) {const opened=await OwnedRpcSession.launch(options,factory);await opened.close();}
+        else {await assert.rejects(OwnedRpcSession.launch(options,factory),/identity|transcript/);assert.equal(next.closeCount,1);}
+        assert.ok(args.includes(`--${mode}`));
+        assert.ok(!next.commands.some(({command})=>['prompt','switch_session','fork','clone'].includes(command.type)));
+      }
+    }
+  });
+});

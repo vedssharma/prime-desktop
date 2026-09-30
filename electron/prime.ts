@@ -1,11 +1,11 @@
 import { execFile, spawn } from 'node:child_process';
-import { access, readFile, stat } from 'node:fs/promises';
+import { access, readFile, stat, lstat, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { OwnedRpcSession, type OwnedRpcStats as SessionUsage } from './owned-rpc.js';
 import { OwnedStore, type OwnedMetadata } from './owned-store.js';
 import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { DaemonTransport, type WireRecord } from './transport.js';
 import { readBoundedFile, isRecord } from './bounded-io.js';
@@ -15,6 +15,7 @@ const exec = promisify(execFile);
 interface Session { supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
 interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; images?: ImageAttachment[]; }
 interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[]; }
+interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord; }
 export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; }
 
 function text(value: unknown): string { return typeof value === 'string' ? value : ''; }
@@ -94,7 +95,8 @@ export function parseSavedTranscript(contents: string): WireRecord[] {
 
 export class PrimeService {
   private transport: DaemonTransport;
-  private owned = new Map<string, { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord }>();
+  private owned = new Map<string, OwnedEntry>();
+  private openingHistory = new Set<string>();
   private store?: OwnedStore;
   private initialized?: Promise<void>;
   private ownedVersion?: Promise<{ allowed: boolean; reason?: string; checkedAt: number }>;
@@ -134,8 +136,8 @@ export class PrimeService {
     }
     if (!this.ownedVersion) this.ownedVersion = (async () => {
       try {
-        const { stdout } = await exec(await this.cli(), ['--version'], { timeout: 5000, maxBuffer: 8192 });
-        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(stdout.trim()) ? { allowed: true, checkedAt: Date.now() } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.', checkedAt: Date.now() };
+        const { stdout, stderr } = await exec(await this.cli(), ['--version'], { timeout: 5000, maxBuffer: 8192 });
+        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(`${stdout}\n${stderr}`.trim()) ? { allowed: true, checkedAt: Date.now() } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.', checkedAt: Date.now() };
       } catch { return { allowed: false, reason: 'Install Prime Agent 0.9.6 or check the CLI executable path in Settings.', checkedAt: Date.now() }; }
     })();
     return this.ownedVersion;
@@ -279,6 +281,64 @@ export class PrimeService {
     this.creations.add(task);
     try { return await task; } finally { this.creations.delete(task); }
   }
+  private observeOwned(entry: OwnedEntry) {
+    const metadata = entry.metadata;
+    entry.rpc!.onEvent(event => {
+      if (event.type === 'agent_start') (entry.state ??= {}).isStreaming = true;
+      if (event.type === 'agent_end') { (entry.state ??= {}).isStreaming = false; entry.streaming = undefined; }
+      if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') entry.streaming = event.message;
+      if (event.type === 'message_end') entry.streaming = undefined;
+      metadata.updatedAt = new Date().toISOString();
+      // Persist activity at the end of each run so history sorts correctly after a relaunch.
+      if (event.type === 'agent_end') void this.persistActivity(metadata);
+    });
+  }
+  resumeOwnedSession(id: string, allowFileChanges: boolean): Promise<Session> { return this.openHistory(id, 'resume', allowFileChanges); }
+  forkOwnedSession(id: string, allowFileChanges: boolean): Promise<Session> { return this.openHistory(id, 'fork', allowFileChanges); }
+  private async openHistory(id: string, mode: 'resume' | 'fork', consent: boolean): Promise<Session> {
+    if (this.closing) throw Error('Desktop sessions are closing.');
+    if (this.openingHistory.has(id)) throw Error('This saved session is already opening.');
+    this.openingHistory.add(id);
+    const task = (async () => {
+      await this.initializeOwned();
+      const source = this.owned.get(id);
+      if (!source) return this.assertWritable();
+      if (!(await this.ownedSupport()).allowed) throw Error('Opening saved sessions requires verified Prime Agent 0.9.6.');
+      if (consent !== true) throw Error('Confirm workspace trust before opening saved history.');
+      if (source.rpc?.alive) throw Error('Close the desktop session before resuming or forking its saved history.');
+      await source.rpc?.close();
+      await this.store!.initialize();
+      const file = source.metadata.sessionFile;
+      if (!(await lstat(file)).isFile() || await realpath(file) !== resolve(file) || dirname(file) !== this.store!.transcripts) throw Error('Saved history must be a regular file inside desktop storage.');
+      const contents = await readBoundedFile(file);
+      let header: WireRecord;
+      try { header = JSON.parse(contents.split('\n', 1)[0]); } catch { throw Error('Invalid saved session header.'); }
+      if (header?.type !== 'session' || header.id !== source.metadata.sessionId) throw Error('Saved session identity mismatch.');
+      const cwd = await realpath(source.metadata.cwd);
+      if (!header.cwd || await realpath(header.cwd) !== cwd) throw Error('Saved session workspace mismatch.');
+      if (!(await stat(cwd)).isDirectory()) throw Error('Saved workspace is unavailable.');
+      // Parse before launch: malformed/ambiguous history must not be admitted to a new owner.
+      parseSavedTranscript(contents);
+      if (contents.split('\n').slice(1).some(line => { try { return JSON.parse(line)?.type === 'session'; } catch { return false; } })) throw Error('Multiple session headers. Refusing ambiguous saved history.');
+      if (this.closing) throw Error('Desktop sessions are closing.');
+      const rpc = await OwnedRpcSession.launch({ executable: await this.cli(), cwd, sessionDir: this.store!.transcripts, socketPath: this.transport.socketPath, source: {mode, sessionFile:file, sessionId:source.metadata.sessionId} });
+      try {
+        const state = await rpc.getState();
+        if (this.closing) throw Error('Desktop closed before saved history opened.');
+        const now = new Date().toISOString();
+        const metadata: OwnedMetadata = mode === 'resume'
+          ? {...source.metadata, model:[state.model?.provider,state.model?.id].filter(Boolean).join('/'), updatedAt:now}
+          : {id:`desktop-${randomUUID()}`,sessionId:rpc.id,sessionFile:rpc.sessionFile,title:`Fork of ${source.metadata.title}`.slice(0,200),cwd,model:[state.model?.provider,state.model?.id].filter(Boolean).join('/'),createdAt:now,updatedAt:now};
+        await this.store!.save(metadata);
+        const entry: OwnedEntry = {metadata,rpc,state};
+        this.owned.set(metadata.id,entry); this.observeOwned(entry);
+        return this.ownedSession(entry);
+      } catch (error) { await rpc.close(); throw error; }
+    })();
+    this.creations.add(task);
+    try { return await task; }
+    finally { this.creations.delete(task); this.openingHistory.delete(id); }
+  }
   private async createOwned(input: CreateInput): Promise<Session> {
     await this.initializeOwned(); await this.store!.initialize();
     if (this.closing) throw Error('Desktop sessions are closing.');
@@ -291,15 +351,7 @@ export class PrimeService {
       entry.state = await rpc.getState();
       if (input.images?.length && !supportsImages(entry.state.model)) throw Error('The selected model does not report image support. Choose an image-capable model before sending.');
       await this.store!.save(metadata); this.owned.set(metadata.id, entry);
-      rpc.onEvent(event => {
-        if (event.type === 'agent_start') entry.state.isStreaming = true;
-        if (event.type === 'agent_end') { entry.state.isStreaming = false; entry.streaming = undefined; }
-        if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') entry.streaming = event.message;
-        if (event.type === 'message_end') entry.streaming = undefined;
-        metadata.updatedAt = new Date().toISOString();
-        // Persist activity at the end of each run so history sorts correctly after a relaunch.
-        if (event.type === 'agent_end') void this.persistActivity(metadata);
-      });
+      this.observeOwned(entry);
       if (this.closing) throw Error('Desktop closed before prompt admission.');
       entry.state.isStreaming = true; await rpc.send(input.prompt, input.images);
       return this.ownedSession(entry);
@@ -338,6 +390,7 @@ export class PrimeService {
   }
   async closeOwnedSession(id: string): Promise<void> {
     await this.initializeOwned(); const entry = this.owned.get(id); if (!entry) return this.assertWritable();
+    if (this.openingHistory.has(id)) throw Error('Wait until this saved session finishes opening.');
     await entry.rpc?.close(); entry.rpc = undefined; entry.state = {}; await this.store!.save(entry.metadata);
   }
   async deleteSession(_id: string): Promise<void> { return this.assertWritable(); }

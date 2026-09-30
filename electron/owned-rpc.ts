@@ -12,6 +12,8 @@ export interface OwnedRpcLaunch {
   model?: string;
   socketPath?: string;
   timeoutMs?: number;
+  /** Explicit startup selection only; the bound pipe can never navigate afterward. */
+  source?: { mode: 'resume' | 'fork'; sessionFile: string; sessionId: string };
 }
 export interface OwnedRpcState extends RecordValue {
   sessionId: string;
@@ -36,7 +38,8 @@ export type OwnedRpcFactory = (launch: RpcLaunch) => OwnedRpcTransport;
 /**
  * A new root owned by one RPC stdin pipe, not a writable daemon selector.
  * Ownership (Prime Agent 0.9.6) is the safety boundary. State checks alone are
- * not atomic identity guards. Never add resume, navigation, or promotion here.
+ * not atomic identity guards. Never add runtime navigation or promotion here.
+ * Explicit startup resume/fork is allowed only for verified closed desktop history.
  */
 export class OwnedRpcSession {
   readonly id: string;
@@ -70,6 +73,12 @@ export class OwnedRpcSession {
     const sessionDir = await realpath(options.sessionDir);
     if (!(await stat(sessionDir)).isDirectory()) throw Error('Session storage must be a directory.');
     const args = ['--mode', 'rpc', '--cwd', cwd, '--session-dir', sessionDir, '--no-extensions'];
+    if (options.source) {
+      if (!['resume', 'fork'].includes(options.source.mode) || !options.source.sessionId || !isAbsolute(options.source.sessionFile)) throw Error('Invalid saved session source.');
+      const sourceFile = await realpath(options.source.sessionFile);
+      if (dirname(sourceFile) !== sessionDir || !(await stat(sourceFile)).isFile()) throw Error('Saved session source must be inside desktop storage.');
+      args.push(`--${options.source.mode}`, sourceFile);
+    }
     if (options.socketPath) args.push('--daemon-socket', resolve(options.socketPath));
     if (options.model) {
       if (!options.model.trim() || /[\r\n\0]/.test(options.model)) throw Error('Invalid model selector.');
@@ -80,6 +89,8 @@ export class OwnedRpcSession {
     try {
       const state = OwnedRpcSession.parseState(await rpc.request({ type: 'get_state' }, false));
       if (dirname(resolve(state.sessionFile)) !== sessionDir) throw Error('Owned session storage mismatch.');
+      if (options.source?.mode === 'resume' && (state.sessionId !== options.source.sessionId || state.sessionFile !== await realpath(options.source.sessionFile))) throw Error('Resumed session identity mismatch.');
+      if (options.source?.mode === 'fork' && (state.sessionId === options.source.sessionId || resolve(state.sessionFile) === await realpath(options.source.sessionFile))) throw Error('Fork must have a separate session identity and transcript.');
       return new OwnedRpcSession(rpc, cwd, state);
     } catch (error) {
       await rpc.close();

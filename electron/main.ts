@@ -57,6 +57,8 @@ function registerIPC() {
   });
   handle('setSessionModel', (id, model) => service.setSessionModel(text(id, 'session ID', 4096), text(model, 'model', 512)));
   handle('closeOwnedSession', id => service.closeOwnedSession(text(id, 'session ID', 4096)));
+  handle('resumeOwnedSession', (id, consent) => service.resumeOwnedSession(text(id, 'session ID', 4096), consent === true));
+  handle('forkOwnedSession', (id, consent) => service.forkOwnedSession(text(id, 'session ID', 4096), consent === true));
   handle('sendMessage', (id, message, images) => {
     const command = promptCommand(message, images);
     return service.sendMessage(text(id, 'session ID', 4096), command.message, command.images);

@@ -12,6 +12,8 @@ export const previewAPI: PrimeAPI = {
   createSession: desktopOnly,
   setSessionModel: desktopOnly,
   closeOwnedSession: desktopOnly,
+  resumeOwnedSession: desktopOnly,
+  forkOwnedSession: desktopOnly,
   sendMessage: desktopOnly,
   interruptSession: desktopOnly,
   getSessionUsage: desktopOnly,
