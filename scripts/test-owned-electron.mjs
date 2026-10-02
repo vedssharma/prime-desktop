@@ -74,5 +74,8 @@ try {
  await page.evaluate(id=>window.prime.closeOwnedSession(id),fork.id);
  await page.evaluate(id=>window.prime.setSessionArchived(id,true),fork.id);
  expect((await page.evaluate(()=>window.prime.listSessions())).find(session=>session.id===fork.id).archived).toBe(true);
- console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history, consent-based fork/resume, independent follow-ups, streamed output events and archive. No LLM request made.');
+ // Conversation search crosses the real bridge and reads saved desktop transcripts.
+ expect((await page.evaluate(()=>window.prime.searchSessions('resumed fixture'))).map(match=>match.id)).toEqual([owned.id]);
+ await expect(page.evaluate(()=>window.prime.searchSessions(''))).rejects.toThrow(/Invalid search/);
+ console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history, consent-based fork/resume, independent follow-ups, streamed output events, archive and conversation search. No LLM request made.');
 }catch(error){console.error(error);throw error;}finally{await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});}).catch(()=>{});try{const page=await app.firstWindow();await page.evaluate(async()=>{for(const session of await window.prime.listSessions())if(session.ownership==='desktop')await window.prime.closeOwnedSession(session.id);});}catch{/* best-effort cleanup */}await app.close();await rm(dir,{recursive:true,force:true});}
