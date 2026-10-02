@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   connect: () => invoke('connect'),
   listSessions: () => invoke('listSessions'),
   getMessages: (id: string) => invoke('getMessages', id),
+  searchSessions: (query: string) => invoke('searchSessions', query),
   listModels: () => invoke('listModels'),
   createSession: (input: { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[] }) => invoke('createSession', input),
   setSessionModel: (id: string, model: string) => invoke('setSessionModel', id, model),

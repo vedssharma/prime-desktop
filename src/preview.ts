@@ -21,6 +21,8 @@ export const previewAPI: PrimeAPI = {
   renameSession: desktopOnly,
   deleteSession: desktopOnly,
   setSessionArchived: desktopOnly,
+  // No sessions in the preview, so nothing can match.
+  searchSessions: async () => [],
   chooseDirectory: desktopOnly,
   openDirectory: desktopOnly,
   workspaceList: desktopOnly,

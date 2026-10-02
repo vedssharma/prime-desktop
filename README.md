@@ -50,7 +50,7 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 
 - Create desktop-owned sessions in trusted workspaces using your existing CLI credentials.
 - Send prompts/follow-ups, attach images, view streamed output, stop work, and change the model when idle.
-- Browse and search existing Prime Agent sessions without changing them.
+- Browse and search existing Prime Agent sessions without changing them. Sidebar search matches titles, folders, tags and conversation text, with an excerpt of the match.
 - Read conversations, Markdown responses, and tool output.
 - Copy responses through a validated native clipboard bridge.
 - Keep separate unsent drafts for each session while the app is open.

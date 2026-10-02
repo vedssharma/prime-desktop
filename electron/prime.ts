@@ -30,6 +30,18 @@ export interface PrimeOptions { socketPath?: string; home?: string; executable?:
   trash?: (file: string) => Promise<void>; }
 /** How often a streaming reply is pushed to the renderer at most. Token events can arrive far faster. */
 const STREAM_INTERVAL_MS = 50;
+/** Parsed saved transcripts kept for switching between recent sessions. */
+const TRANSCRIPT_CACHE_ENTRIES = 6;
+/** Text kept for full-text search across every saved transcript. */
+const SEARCH_CACHE_BYTES = 32 * 1024 * 1024;
+export interface SearchMatch { id: string; snippet: string }
+type TranscriptCache = Map<string, { key: string; messages: Message[]; size: number }>;
+
+/** A short single-line excerpt centered on the first match. */
+export function snippetAround(content: string, index: number, length: number, radius = 48): string {
+  const start = Math.max(0, index - radius), end = Math.min(content.length, index + length + radius);
+  return `${start > 0 ? '…' : ''}${content.slice(start, end).replace(/\s+/g, ' ').trim()}${end < content.length ? '…' : ''}`;
+}
 
 function text(value: unknown): string { return typeof value === 'string' ? value : ''; }
 function date(value: unknown): string | undefined {
@@ -132,7 +144,8 @@ export class PrimeService {
   private options: PrimeOptions;
   private home: string;
   private executable?: string;
-  private transcriptCache?: { key: string; messages: Message[] };
+  private transcriptCache: TranscriptCache = new Map();
+  private searchCache: TranscriptCache = new Map();
   private modelsLoading?: Promise<{ id: string; name: string }[]>;
   constructor(options: PrimeOptions = {}) {
     this.options = options;
@@ -260,21 +273,60 @@ export class PrimeService {
     }
     // Runtime IDs are reusable, so use the catalog's persisted file and verify its header.
     const raw = entry ? { sessionFile: entry.metadata.sessionFile } : await this.lookup(id, true);
-    const expectedId = entry?.metadata.sessionId ?? id;
-    if (!raw.sessionFile) throw new Error('This session has no saved transcript. Open it in the CLI.');
-    const metadata = await stat(raw.sessionFile);
-    const cacheKey = JSON.stringify([id, raw.sessionFile, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs]);
-    if (this.transcriptCache?.key === cacheKey) return this.transcriptCache.messages;
+    return this.readSaved(id, raw.sessionFile, entry?.metadata.sessionId ?? id, this.transcriptCache, entries => entries > TRANSCRIPT_CACHE_ENTRIES);
+  }
+  /**
+   * Parse a saved transcript after checking its header names the expected session. Results are
+   * cached by file identity, size and timestamps, so an unchanged file is never re-read.
+   */
+  private async readSaved(id: string, file: unknown, expectedId: string, cache: TranscriptCache, full: (entries: number, bytes: number) => boolean): Promise<Message[]> {
+    if (typeof file !== 'string' || !file) throw new Error('This session has no saved transcript. Open it in the CLI.');
+    const metadata = await stat(file);
+    const cacheKey = JSON.stringify([file, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs]);
+    const hit = cache.get(id);
+    if (hit?.key === cacheKey) { cache.delete(id); cache.set(id, hit); return hit.messages; }
     if (metadata.size > 64 * 1024 * 1024) throw new Error('This saved transcript exceeds the 64 MiB desktop limit. Open it in the CLI.');
-    const contents = await readBoundedFile(raw.sessionFile);
+    const contents = await readBoundedFile(file);
     let header: WireRecord;
     try { header = JSON.parse(contents.split('\n', 1)[0]); }
     catch { throw new Error('Invalid saved session header.'); }
     if (header?.type !== 'session' || header.id !== expectedId) throw new Error('Session identity mismatch. Refusing to display another conversation.');
     if (contents.split('\n').slice(1).some(line => { try { return JSON.parse(line)?.type === 'session'; } catch { return false; } })) throw new Error('Multiple session headers. Refusing an ambiguous transcript.');
     const messages = normalizeMessages(parseSavedTranscript(contents));
-    this.transcriptCache = { key: cacheKey, messages };
+    cache.delete(id);
+    cache.set(id, { key: cacheKey, messages, size: messages.reduce((total, message) => total + message.content.length * 2, 0) });
+    let bytes = [...cache.values()].reduce((total, item) => total + item.size, 0);
+    // Least recently used first; always keep the transcript just read.
+    for (const [oldest, item] of cache) {
+      if (cache.size <= 1 || !full(cache.size, bytes)) break;
+      cache.delete(oldest); bytes -= item.size;
+    }
     return messages;
+  }
+  /**
+   * Sessions whose saved conversation text contains `query` (case-insensitive), with a short excerpt.
+   * Reads only transcripts the catalog or desktop storage already names, with the same identity
+   * checks and 64 MiB limit as opening them. Unreadable transcripts are skipped.
+   */
+  async searchSessions(query: string): Promise<SearchMatch[]> {
+    const needle = query.trim().toLowerCase();
+    if (needle.length < 2) return [];
+    const sessions = await this.listSessions();
+    const matches: SearchMatch[] = [];
+    for (const session of sessions) {
+      const entry = this.owned.get(session.id);
+      let messages: Message[];
+      try {
+        messages = entry?.rpc?.alive && entry.messages ? entry.messages
+          : await this.readSaved(session.id, entry ? entry.metadata.sessionFile : this.sessions.get(session.id)?.sessionFile, entry?.metadata.sessionId ?? session.id, this.searchCache, (_entries, bytes) => bytes > SEARCH_CACHE_BYTES);
+      } catch { continue; }
+      for (const message of messages) {
+        const index = message.content.toLowerCase().indexOf(needle);
+        if (index !== -1) { matches.push({ id: session.id, snippet: snippetAround(message.content, index, needle.length) }); break; }
+      }
+      if (matches.length >= 100) break;
+    }
+    return matches;
   }
   async listModels(): Promise<{ id: string; name: string }[]> {
     if (!this.modelsLoading) this.modelsLoading = this.loadModels().finally(() => { this.modelsLoading = undefined; });
@@ -485,7 +537,7 @@ export class PrimeService {
     }
     await this.store!.remove(entry.metadata.id);
     this.owned.delete(id);
-    this.transcriptCache = undefined;
+    this.transcriptCache.delete(id); this.searchCache.delete(id);
   }
   close(): Promise<void> {
     if (this.closingPromise) return this.closingPromise;

@@ -36,6 +36,8 @@ export interface SessionUsage {
 export type SessionEvent =
   | { type: 'stream'; sessionId: string; streamId: string; messages: Message[] }
   | { type: 'changed' | 'activity'; sessionId: string };
+/** A session whose saved conversation text matched a sidebar search. */
+export interface SearchMatch { id: string; snippet: string; }
 export interface ModelOption { id: string; name: string; }
 export interface ConnectionStatus {
   connected: boolean;
@@ -63,6 +65,8 @@ export interface PrimeAPI {
   connect(): Promise<ConnectionStatus>;
   listSessions(): Promise<Session[]>;
   getMessages(id: string): Promise<Message[]>;
+  /** Optional so the browser preview and test fakes can omit it; title search still works without it. */
+  searchSessions?(query: string): Promise<SearchMatch[]>;
   listModels(): Promise<ModelOption[]>;
   setSessionModel(id: string, model: string): Promise<void>;
   closeOwnedSession(id: string): Promise<void>;

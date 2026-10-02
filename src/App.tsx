@@ -269,8 +269,21 @@ export default function App() {
   const [metaStorageError, setMetaStorageError] = useState(false);
   const updateMeta = (next: SessionMeta) => { setMeta(next); setMetaStorageError(!saveSessionMeta(next)); };
   const [showArchived, setShowArchived] = useState(false);
+  // Conversation-text matches for the sidebar search, keyed by session ID with an excerpt.
+  const [contentMatches, setContentMatches] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    const query = search.trim();
+    if (query.length < 2 || !window.prime.searchSessions) { setContentMatches(new Map()); return; }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void window.prime.searchSessions!(query)
+        .then(found => { if (!cancelled) setContentMatches(new Map(found.map(match => [match.id, match.snippet]))); })
+        .catch(() => { if (!cancelled) setContentMatches(new Map()); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [search]);
   const archivedCount = useMemo(() => sessions.filter(session => session.archived).length, [sessions]);
-  const grouped = useMemo(() => groupSessions(showArchived ? sessions : sessions.filter(session => !session.archived), { search, tag: tagFilter, meta }), [sessions, showArchived, search, tagFilter, meta]);
+  const grouped = useMemo(() => groupSessions(showArchived ? sessions : sessions.filter(session => !session.archived), { search, tag: tagFilter, meta, contentMatches }), [sessions, showArchived, search, tagFilter, meta, contentMatches]);
   // Closed desktop history lives in app storage, so it can be archived or deleted without touching shared CLI sessions.
   const closedOwned = active?.ownership === 'desktop' && active.lifecycle === 'closed';
   const commands: Command[] = dialog === 'palette' ? [
@@ -458,7 +471,7 @@ export default function App() {
   }
 
   return <div className={`app-shell ${isElectron ? 'electron' : 'browser-preview'}`}>
-    <Sidebar sidebarRef={sidebarRef} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} dialog={dialog} narrow={narrow} drawerOpen={drawerOpen} newSession={newSession} search={search} setSearch={setSearch} sessions={sessions} grouped={grouped} loading={loading} archivedCount={archivedCount} showArchived={showArchived} setShowArchived={setShowArchived} activeId={activeId} setActiveId={setActiveId} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} metaStorageError={metaStorageError} knownTags={knownTags} tagFilter={tagFilter} setTagFilter={setTagFilter} connection={connection} connecting={connecting} reconnect={reconnect} setDialog={setDialog} />
+    <Sidebar sidebarRef={sidebarRef} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} dialog={dialog} narrow={narrow} drawerOpen={drawerOpen} newSession={newSession} search={search} setSearch={setSearch} contentMatches={contentMatches} sessions={sessions} grouped={grouped} loading={loading} archivedCount={archivedCount} showArchived={showArchived} setShowArchived={setShowArchived} activeId={activeId} setActiveId={setActiveId} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} metaStorageError={metaStorageError} knownTags={knownTags} tagFilter={tagFilter} setTagFilter={setTagFilter} connection={connection} connecting={connecting} reconnect={reconnect} setDialog={setDialog} />
     <main inert={!!dialog || drawerOpen} className="main-panel">
       <Topbar sidebarToggle={sidebarToggle} setSidebarOpen={setSidebarOpen} active={active} running={running} readOnly={readOnly} pending={pending} connection={connection} messages={messages} workspaceOpen={workspaceOpen} setWorkspaceOpen={setWorkspaceOpen} menuOpen={menuOpen} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} setTagInput={setTagInput} setRenameTitle={setRenameTitle} setDialog={setDialog} setError={setError} exportConversation={exportConversation} showHistoryAction={showHistoryAction} setArchived={setArchived} />
       {active && <div className="session-context"><button onClick={() => void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err)))} title={active.cwd}><Folder size={13} /><span>{active.cwd}</span></button><span className="context-separator" /><span><Zap size={12} />{active.model || 'CLI default'}</span></div>}

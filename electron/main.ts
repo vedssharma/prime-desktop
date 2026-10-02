@@ -49,6 +49,7 @@ function registerIPC() {
   handle('connect', () => service.connect());
   handle('listSessions', () => service.listSessions());
   handle('listModels', () => service.listModels());
+  handle('searchSessions', (query) => service.searchSessions(text(query, 'search', 200)));
   handle('getMessages', (id) => service.getMessages(text(id, 'session ID', 4096)));
   handle('createSession', async (value) => {
     if (configuring) throw new Error('Wait for connection settings to finish changing.');
