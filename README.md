@@ -61,6 +61,7 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 - Native notifications when a session finishes while the app is in the background (Settings → Readability).
 - Pin sessions, add local tags, filter by tag, and group the sidebar by date or workspace. Pins and tags are stored only in this app.
 - Command palette (Cmd/Ctrl+K) for actions and jumping between sessions.
+- Find in the open conversation (Cmd/Ctrl+F), including collapsed tool output. Messages hidden behind **Load earlier** can be loaded into the search.
 - Read-only workspace panel: Git changes with diffs, and a file browser with previews. Paths are confined to the session's folder, symlinks are not followed, and Git is run with external diff and fsmonitor hooks disabled. This is a viewer, not a sandbox for agent tools.
 - Preserve saved desktop history when a session closes. Closed sessions remain read-only until explicitly resumed with renewed workspace trust.
 - Archive closed desktop sessions to hide them from the sidebar (**Show archived** brings them back), or delete them: the saved transcript moves to the system trash and workspace files are not touched. Shared CLI sessions cannot be archived or deleted from the app.

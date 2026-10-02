@@ -19,8 +19,9 @@ import { allTags, groupSessions, loadSessionMeta, saveSessionMeta, togglePin, ty
 import { readImageFiles, type DraftImage } from './attachments';
 import { validateImages, promptCommand } from '../electron/attachments';
 import { errorText, folderName } from './format';
-import { isElectron, newSessionShortcut } from './platform';
+import { findShortcut, isElectron, newSessionShortcut } from './platform';
 import { mergeStream } from './stream';
+import FindBar from './FindBar';
 import DockMark from './DockMark';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
@@ -88,6 +89,9 @@ export default function App() {
     return () => { toggle?.focus(); };
   }, [drawerOpen]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  // Bumped to re-focus the find field when Cmd/Ctrl+F is pressed while it is already open.
+  const [findFocus, setFindFocus] = useState(0);
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   const dialogRef = useRef(dialog);
   dialogRef.current = dialog;
@@ -205,7 +209,7 @@ export default function App() {
 
   useEffect(() => {
     // Errors belong to the view that caused them; do not carry them into another session.
-    setMessages([]); setVisibleMessages(100); setError(''); setFollow(true); knownIds.current = null;
+    setMessages([]); setVisibleMessages(100); setError(''); setFollow(true); knownIds.current = null; setFindOpen(false);
     // Swapping content clamps scrollTop; that is not the user scrolling up, so reset the baseline.
     lastScrollTop.current = 0;
     if (!activeId) { setLoadingMessages(false); return; }
@@ -238,7 +242,7 @@ export default function App() {
   useEffect(() => { if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 190)}px`; } }, [draft]);
   const newSession = useCallback(() => { setActiveId(null); setAllowFileChanges(false); setSidebarOpen(false); setMenuOpen(false); setTimeout(() => { if (!dialogRef.current && activeIdRef.current === null) textarea.current?.focus(); }, 50); }, []);
   useEffect(() => {
-    const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); if (!dialogRef.current) newSession(); } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (dialogRef.current === 'palette') setDialog(null); else if (!dialogRef.current) { setSidebarOpen(false); setMenuOpen(false); setDialog('palette'); } } if (event.key === 'Escape') { if (dialogPendingRef.current) return; setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
+    const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); if (!dialogRef.current) newSession(); } if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); if (!dialogRef.current && activeIdRef.current) { setFindOpen(true); setFindFocus(count => count + 1); } } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (dialogRef.current === 'palette') setDialog(null); else if (!dialogRef.current) { setSidebarOpen(false); setMenuOpen(false); setDialog('palette'); } } if (event.key === 'Escape') { if (dialogPendingRef.current) return; setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
     window.addEventListener('keydown', keydown); return () => window.removeEventListener('keydown', keydown);
   }, [newSession]);
 
@@ -273,6 +277,7 @@ export default function App() {
     { id: 'new', label: 'New session', group: 'Actions', detail: newSessionShortcut, run: newSession },
     { id: 'settings', label: 'Open settings', group: 'Actions', keywords: 'appearance theme providers models connection preferences', run: () => setDialog('settings') },
     { id: 'about', label: 'About Session Dock', group: 'Actions', keywords: 'help shortcuts version', run: () => setDialog('about') },
+    ...(active ? [{ id: 'find', label: 'Find in conversation', group: 'Actions' as const, detail: findShortcut, keywords: 'search text', run: () => { setFindOpen(true); setFindFocus(count => count + 1); } }] : []),
     ...(active ? [{ id: 'workspace', label: workspaceOpen ? 'Hide workspace files and changes' : 'Show workspace files and changes', group: 'Actions' as const, keywords: 'git diff explorer folder', run: () => setWorkspaceOpen(!workspaceOpen) }] : []),
     { id: 'reconnect', label: 'Reconnect to Prime Agent', group: 'Actions', keywords: 'connect start service', run: () => void reconnect() },
     { id: 'group', label: meta.groupBy === 'date' ? 'Group sessions by workspace' : 'Group sessions by date', group: 'Actions', keywords: 'sidebar organize', run: () => updateMeta({ ...meta, groupBy: meta.groupBy === 'date' ? 'workspace' : 'date' }) },
@@ -463,6 +468,7 @@ export default function App() {
       {active?.ownership !== 'desktop' && connection?.readOnly && <div className="offline-banner" role="status">{connection?.canCreateOwned ? 'Shared CLI sessions are read-only. Start a new desktop-owned session to work with Prime.' : connection?.ownedReason || connection?.safetyReason}</div>}
       {error && <div className="error-banner" role="alert"><CircleHelp size={16} /><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
       {connection && !connection.connected && <div className="offline-banner"><span>{connection.error || 'Connect to Prime Agent to start working.'}</span><button onClick={reconnect} disabled={connecting}>{connecting ? 'Connecting...' : 'Start agent service / reconnect'}<RefreshCw size={12} className={connecting ? 'spin' : ''} /></button></div>}
+      {activeId && findOpen && <FindBar containerRef={conversationRef} version={messages} hiddenCount={Math.max(0, messages.length - visibleMessages)} onShowAll={() => { setFollow(false); setVisibleMessages(messages.length); }} onClose={() => { setFindOpen(false); textarea.current?.focus(); }} focusRequest={findFocus} />}
       <div className={`content-scroll ${!activeId ? 'welcome-scroll' : ''}`} ref={scrollArea} onScroll={() => { const node = scrollArea.current; if (!node) return; if (node.scrollHeight - node.scrollTop - node.clientHeight < 100) setFollow(true); else if (node.scrollTop < lastScrollTop.current) setFollow(false); lastScrollTop.current = node.scrollTop; }}>
         {!activeId ? <Welcome onStarter={prompt => { setDraft(prompt); textarea.current?.focus(); }} /> : <Conversation conversationRef={conversationRef} knownIds={knownIds} active={active} running={running} loadingMessages={loadingMessages} messages={messages} conversationItems={conversationItems} visibleMessages={visibleMessages} setVisibleMessages={setVisibleMessages} setFollow={setFollow} />}
         {activeId && showJump && <div className="jump-latest-anchor"><button type="button" className="jump-latest" onClick={() => { setFollow(true); if (scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }}><ArrowDown size={13} />Jump to latest</button></div>}
