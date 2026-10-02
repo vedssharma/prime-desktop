@@ -1,4 +1,5 @@
 import { historyThroughMessage } from './history-fork.js';
+import { isVerifiedOwnedVersion, parseCliVersion, verifiedVersionsText } from './cli-versions.js';
 import { execFile, spawn } from 'node:child_process';
 import { access, stat, lstat, realpath, writeFile, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -175,8 +176,11 @@ export class PrimeService {
     if (!this.ownedVersion) this.ownedVersion = (async () => {
       try {
         const { stdout, stderr } = await exec(await this.cli(), ['--version'], { timeout: 5000, maxBuffer: 8192 });
-        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(`${stdout}\n${stderr}`.trim()) ? { allowed: true, checkedAt: Date.now() } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.', checkedAt: Date.now() };
-      } catch { return { allowed: false, reason: 'Install Prime Agent 0.9.6 or check the CLI executable path in Settings.', checkedAt: Date.now() }; }
+        const version = parseCliVersion(`${stdout}\n${stderr}`);
+        if (isVerifiedOwnedVersion(version)) return { allowed: true, checkedAt: Date.now() };
+        const found = version ? `Prime Agent ${version} is installed. ` : '';
+        return { allowed: false, reason: `${found}Desktop-owned sessions currently require verified Prime Agent ${verifiedVersionsText()}. Shared sessions remain read-only.`, checkedAt: Date.now() };
+      } catch { return { allowed: false, reason: `Install Prime Agent ${verifiedVersionsText()} or check the CLI executable path in Settings.`, checkedAt: Date.now() }; }
     })();
     return this.ownedVersion;
   }
@@ -400,7 +404,7 @@ export class PrimeService {
       await this.initializeOwned();
       const source = this.owned.get(id);
       if (!source) return this.assertWritable();
-      if (!(await this.ownedSupport()).allowed) throw Error('Opening saved sessions requires verified Prime Agent 0.9.6.');
+      if (!(await this.ownedSupport()).allowed) throw Error(`Opening saved sessions requires verified Prime Agent ${verifiedVersionsText()}.`);
       if (consent !== true) throw Error('Confirm workspace trust before opening saved history.');
       if (source.rpc?.alive) throw Error('Close the desktop session before resuming or forking its saved history.');
       await source.rpc?.close();

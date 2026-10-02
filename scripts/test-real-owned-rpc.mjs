@@ -8,6 +8,9 @@ import { once } from 'node:events';
 import assert from 'node:assert/strict';
 import { historyThroughMessage } from '../dist-electron/history-fork.js';
 import { normalizeMessages, parseSavedTranscript } from '../dist-electron/prime.js';
+import { parseCliVersion } from '../dist-electron/cli-versions.js';
+// Set PRIME_PROBE_VERSION to the release under review before adding it to VERIFIED_OWNED_VERSIONS.
+const expectedVersion = process.env.PRIME_PROBE_VERSION || '0.9.6';
 
 const binary = process.argv[2];
 if (!binary) throw Error('Usage: node scripts/test-real-owned-rpc.mjs /absolute/prime-agent [report.json]');
@@ -69,7 +72,7 @@ try {
   versionProcess.stderr.on('data', chunk => { versionText += chunk.toString(); });
   await deadline(versionProcess.done, 10000, 'Version check timed out');
   report.version = versionText.trim();
-  assert.equal(report.version, '0.9.6', 'This ownership probe is pinned to the reviewed version');
+  assert.equal(parseCliVersion(report.version), expectedVersion, 'This ownership probe is pinned to the version under review');
   supervisor = launch('daemon');
   peer = await connect();
   const peerChannel = channel(peer, peer, true);
