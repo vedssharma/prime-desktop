@@ -20,6 +20,7 @@ import { readImageFiles, type DraftImage } from './attachments';
 import { validateImages, promptCommand } from '../electron/attachments';
 import { errorText, folderName } from './format';
 import { isElectron, newSessionShortcut } from './platform';
+import { mergeStream } from './stream';
 import DockMark from './DockMark';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
@@ -136,6 +137,9 @@ export default function App() {
   const canAttach = active ? active.ownership === 'desktop' && active.writable === true && active.supportsImages !== false : connection?.canCreateOwned === true;
   const attachmentReason = active?.supportsImages === false ? 'Choose an image-capable model to attach images.' : 'Images are available in writable desktop-owned sessions.';
   const runningRef = useRef(running); runningRef.current = running;
+  // Desktop-owned sessions push streamed output, so their transcript poll is only a safety net.
+  const pushed = active?.ownership === 'desktop' && typeof window.prime.onSessionEvent === 'function';
+  const pushedRef = useRef(pushed); pushedRef.current = pushed;
   const conversationItems = groupConversation(messages.slice(-visibleMessages));
   const currentCwd = active?.cwd || cwd;
   const refresh = useCallback(async () => { const list = await window.prime.listSessions(); setSessions(list); }, []);
@@ -211,7 +215,7 @@ export default function App() {
     async function poll() {
       try { await readMessages(activeId!); }
       catch (err) { if (!cancelled) setError(errorText(err)); }
-      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, runningRef.current ? 600 : 10000); } }
+      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, runningRef.current ? pushedRef.current ? 3000 : 600 : 10000); } }
     }
     // A run that starts while the idle timer is pending must not wait out the idle delay.
     pollMessagesNow.current = () => { if (!cancelled) { clearTimeout(timer); void poll(); } };
@@ -246,6 +250,12 @@ export default function App() {
     }
     lastStatuses.current = new Map(sessions.map(session => [session.id, session.status]));
   }, [sessions]);
+  useEffect(() => window.prime.onSessionEvent?.(event => {
+    if (event.type === 'activity') void refresh().catch(() => {});
+    if (event.sessionId !== activeIdRef.current) return;
+    if (event.type === 'stream') setMessages(previous => mergeStream(previous, event.streamId, event.messages));
+    else pollMessagesNow.current();
+  }), [refresh]);
   useEffect(() => window.prime.onNotificationClick?.(id => { if (!dialogRef.current) { setActiveId(id); setSidebarOpen(false); setMenuOpen(false); } }), []);
 
   const [workspaceOpen, setWorkspaceOpen] = useState(false);

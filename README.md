@@ -125,7 +125,7 @@ The desktop app does not implement a second agent harness, write directly to ses
 
 ## Scope
 
-This is an initial desktop companion, not complete CLI feature parity. Login, provider setup, extension-specific interactive dialogs, branching, schedules, and advanced harness settings remain in the CLI. Session display refreshes periodically rather than providing a token-by-token renderer stream. This app runs agents with your normal user permissions; workspaces are not sandboxes.
+This is an initial desktop companion, not complete CLI feature parity. Login, provider setup, extension-specific interactive dialogs, branching, schedules, and advanced harness settings remain in the CLI. Desktop-owned sessions stream replies into the view as they are generated; shared CLI sessions refresh periodically. This app runs agents with your normal user permissions; workspaces are not sandboxes.
 
 Local development and unsigned packaging are supported. Signed/notarized public distribution needs platform signing credentials and release setup. The integration targets Prime Agent 0.9.5 with daemon protocol 7 / schema 28 or newer. Other protocol versions fail with an explicit compatibility error; future protocol changes may need an adapter update.
 

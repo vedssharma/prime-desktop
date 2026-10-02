@@ -30,6 +30,10 @@ export interface SessionUsage {
   /** Null values mean the agent has no estimate yet, for example right after compaction. */
   context?: { tokens: number | null; contextWindow: number | null; percent: number | null };
 }
+/** Pushed by the main process for desktop-owned sessions; see electron/prime.ts. */
+export type SessionEvent =
+  | { type: 'stream'; sessionId: string; streamId: string; messages: Message[] }
+  | { type: 'changed' | 'activity'; sessionId: string };
 export interface ModelOption { id: string; name: string; }
 export interface ConnectionStatus {
   connected: boolean;
@@ -79,6 +83,8 @@ export interface PrimeAPI {
   workspaceDiff(id: string, path: string): Promise<WorkspaceDiff>;
   notify(title: string, body: string, sessionId?: string): Promise<void>;
   onNotificationClick(listener: (sessionId: string) => void): () => void;
+  /** Optional so the browser preview and test fakes can omit it; polling still works without it. */
+  onSessionEvent?(listener: (event: SessionEvent) => void): () => void;
   saveText(suggestedName: string, content: string): Promise<boolean>;
 }
 declare global { interface Window { prime: PrimeAPI; } }

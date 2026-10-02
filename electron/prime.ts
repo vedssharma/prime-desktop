@@ -16,8 +16,18 @@ const exec = promisify(execFile);
 interface Session { supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
 interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; images?: ImageAttachment[]; }
 interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[]; }
-interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord; }
-export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; }
+interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord; streamTimer?: ReturnType<typeof setTimeout>; }
+/**
+ * Pushed to the renderer for desktop-owned sessions. `stream` carries the in-progress assistant
+ * reply (already normalized) so the UI can patch it in place; `changed` means the transcript gained
+ * a whole message; `activity` means a run started or ended. Polling stays the source of truth.
+ */
+export type SessionEvent =
+  | { type: 'stream'; sessionId: string; streamId: string; messages: Message[] }
+  | { type: 'changed' | 'activity'; sessionId: string };
+export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; onEvent?: (event: SessionEvent) => void; }
+/** How often a streaming reply is pushed to the renderer at most. Token events can arrive far faster. */
+const STREAM_INTERVAL_MS = 50;
 
 function text(value: unknown): string { return typeof value === 'string' ? value : ''; }
 function date(value: unknown): string | undefined {
@@ -36,10 +46,23 @@ export function normalizeSession(raw: WireRecord): Session {
   };
 }
 
+/**
+ * Live RPC messages have no IDs. Derive them from role and timestamp, not list position, so a
+ * streamed reply keeps the same ID (and React key) once it lands in a full transcript read.
+ */
+function fallbackId(message: WireRecord, index: number, seen: Map<string, number>): string {
+  if (message.timestamp === undefined || message.timestamp === null) return `${message.role}-${index}-${index}`;
+  const key = `${message.role}-${message.timestamp}`;
+  const count = (seen.get(key) ?? 0) + 1;
+  seen.set(key, count);
+  return count === 1 ? key : `${key}-${count}`;
+}
+
 export function normalizeMessages(messages: WireRecord[]): Message[] {
   const output: Message[] = [];
+  const seen = new Map<string, number>();
   messages.forEach((message, index) => {
-    const id = text(message.id) || `${message.role}-${message.timestamp ?? index}-${index}`;
+    const id = text(message.id) || fallbackId(message, index, seen);
     const timestamp = date(message.timestamp);
     if (message.role === 'custom' && message.display === false) return;
     const role: Message['role'] = message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : ['toolResult', 'bashExecution'].includes(message.role) ? 'tool' : 'system';
@@ -283,13 +306,31 @@ export class PrimeService {
     this.creations.add(task);
     try { return await task; } finally { this.creations.delete(task); }
   }
+  private emit(event: SessionEvent) {
+    try { this.options.onEvent?.(event); } catch { /* A renderer that went away must not break the RPC event loop. */ }
+  }
+  /** Push the streaming reply at most every STREAM_INTERVAL_MS; the latest text wins. */
+  private scheduleStream(entry: OwnedEntry) {
+    if (entry.streamTimer || !this.options.onEvent) return;
+    entry.streamTimer = setTimeout(() => {
+      entry.streamTimer = undefined;
+      const streaming = entry.streaming;
+      if (!streaming || !entry.rpc?.alive) return;
+      const messages = normalizeMessages([streaming]);
+      this.emit({ type: 'stream', sessionId: entry.metadata.id, streamId: text(streaming.id) || fallbackId(streaming, 0, new Map()), messages });
+    }, STREAM_INTERVAL_MS);
+  }
+  private endStream(entry: OwnedEntry) {
+    entry.streaming = undefined;
+    clearTimeout(entry.streamTimer); entry.streamTimer = undefined;
+  }
   private observeOwned(entry: OwnedEntry) {
     const metadata = entry.metadata;
     entry.rpc!.onEvent(event => {
-      if (event.type === 'agent_start') (entry.state ??= {}).isStreaming = true;
-      if (event.type === 'agent_end') { (entry.state ??= {}).isStreaming = false; entry.streaming = undefined; }
-      if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') entry.streaming = event.message;
-      if (event.type === 'message_end') entry.streaming = undefined;
+      if (event.type === 'agent_start') { (entry.state ??= {}).isStreaming = true; this.emit({ type: 'activity', sessionId: metadata.id }); }
+      if (event.type === 'agent_end') { (entry.state ??= {}).isStreaming = false; this.endStream(entry); this.emit({ type: 'activity', sessionId: metadata.id }); }
+      if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') { entry.streaming = event.message; this.scheduleStream(entry); }
+      if (event.type === 'message_end') { this.endStream(entry); this.emit({ type: 'changed', sessionId: metadata.id }); }
       metadata.updatedAt = new Date().toISOString();
       // Persist activity at the end of each run so history sorts correctly after a relaunch.
       if (event.type === 'agent_end') void this.persistActivity(metadata);
@@ -410,7 +451,7 @@ export class PrimeService {
   async closeOwnedSession(id: string): Promise<void> {
     await this.initializeOwned(); const entry = this.owned.get(id); if (!entry) return this.assertWritable();
     if (this.openingHistory.has(id)) throw Error('Wait until this saved session finishes opening.');
-    await entry.rpc?.close(); entry.rpc = undefined; entry.state = {}; await this.store!.save(entry.metadata);
+    this.endStream(entry); await entry.rpc?.close(); entry.rpc = undefined; entry.state = {}; await this.store!.save(entry.metadata);
   }
   async deleteSession(_id: string): Promise<void> { return this.assertWritable(); }
   close(): Promise<void> {

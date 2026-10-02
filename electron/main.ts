@@ -12,7 +12,11 @@ const devURL = !app.isPackaged ? process.env.PRIME_DESKTOP_DEV_URL : undefined;
 if (devURL && devURL !== 'http://127.0.0.1:5173') throw new Error('Unexpected development URL');
 let service: PrimeService;
 let connectionConfig = { executable: '', socketPath: '' };
-function createService() { return new PrimeService({ desktopDir: path.join(app.getPath('userData'), 'owned-sessions'), executable: connectionConfig.executable || undefined, socketPath: connectionConfig.socketPath || undefined }); }
+function createService() {
+  return new PrimeService({ desktopDir: path.join(app.getPath('userData'), 'owned-sessions'), executable: connectionConfig.executable || undefined, socketPath: connectionConfig.socketPath || undefined,
+    // Owned-session output is pushed as it streams; only the trusted main window receives it.
+    onEvent: event => { if (window && !window.isDestroyed()) window.webContents.send('prime:session-event', event); } });
+}
 
 let window: BrowserWindow | null = null;
 let configuring = false;

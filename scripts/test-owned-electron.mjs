@@ -63,5 +63,10 @@ try {
  await page.evaluate(id=>window.prime.sendMessage(id,'Resumed fixture follow-up'),owned.id);
  expect((await page.evaluate(id=>window.prime.getMessages(id),fork.id)).at(-1).images).toEqual([image]);
  expect((await page.evaluate(id=>window.prime.getMessages(id),owned.id)).at(-1).content).toBe('Resumed fixture follow-up');
- console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history, consent-based fork/resume and independent follow-ups. No LLM request made.');
+ // Streamed output crosses the real preload bridge, scoped to the session that produced it.
+ const streamed=await page.evaluate(async id=>{const events=[];const stop=window.prime.onSessionEvent(event=>events.push(event));await window.prime.sendMessage(id,'STREAM_PARTIAL');await new Promise(resolve=>setTimeout(resolve,300));await window.prime.sendMessage(id,'FINISH_STREAM');await new Promise(resolve=>setTimeout(resolve,300));stop();return events;},fork.id);
+ expect(streamed.map(event=>event.type)).toEqual(['activity','stream','changed','activity']);
+ expect(streamed.every(event=>event.sessionId===fork.id)).toBe(true);
+ expect(streamed[1].messages.map(message=>message.content)).toEqual(['partial reply']);
+ console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history, consent-based fork/resume, independent follow-ups and streamed output events. No LLM request made.');
 }catch(error){console.error(error);throw error;}finally{await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});}).catch(()=>{});try{const page=await app.firstWindow();await page.evaluate(async()=>{for(const session of await window.prime.listSessions())if(session.ownership==='desktop')await window.prime.closeOwnedSession(session.id);});}catch{/* best-effort cleanup */}await app.close();await rm(dir,{recursive:true,force:true});}

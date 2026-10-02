@@ -34,5 +34,15 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
     ipcRenderer.on('prime:notification-click', wrapped);
     return () => { ipcRenderer.removeListener('prime:notification-click', wrapped); };
   },
+  onSessionEvent: (listener: (event: unknown) => void) => {
+    const wrapped = (_event: unknown, payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const { type, sessionId } = payload as Record<string, unknown>;
+      if (typeof sessionId !== 'string' || !['stream', 'changed', 'activity'].includes(type as string)) return;
+      listener(payload);
+    };
+    ipcRenderer.on('prime:session-event', wrapped);
+    return () => { ipcRenderer.removeListener('prime:session-event', wrapped); };
+  },
   saveText: (suggestedName: string, content: string) => invoke('saveText', suggestedName, content),
 }));

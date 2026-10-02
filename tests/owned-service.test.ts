@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, copyFile, chmod, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { PrimeService } from '../electron/prime.js';
+import { PrimeService, type SessionEvent } from '../electron/prime.js';
 import { fakeDaemon } from './fake-daemon.js';
 
 test('desktop-owned pipe writes only its fixture workspace, persists history, and never routes shared mutations', async () => {
@@ -289,4 +289,41 @@ test('earlier-message fork uses a private snapshot and preserves the complete so
   await service.sendMessage(fork.id,'Independent continuation');
   assert.equal((await service.getMessages(original.id)).length,2);
  });
+});
+
+test('owned sessions push throttled stream, message and activity events with IDs that match later reads', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-events-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const events:SessionEvent[]=[];
+ const service=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent'),onEvent:event=>events.push(event)});
+ try {
+  const session=await service.createSession({cwd:dir,prompt:'Start',allowFileChanges:true});
+  await service.sendMessage(session.id,'STREAM_PARTIAL');
+  await new Promise(resolve=>setTimeout(resolve,120));
+  assert.deepEqual(events.map(event=>event.type),['activity','stream']);
+  const stream=events[1];
+  assert(stream.type==='stream');
+  assert.equal(stream.sessionId,session.id);
+  assert.deepEqual(stream.messages.map(m=>[m.role,m.content]),[['assistant','partial reply']]);
+  // The streamed reply must keep its ID when it appears in a full read, so the UI patches it in place.
+  const read=await service.getMessages(session.id);
+  assert.equal(read.at(-1)?.id,stream.streamId);
+  assert.equal(stream.messages[0].id,stream.streamId);
+  await service.sendMessage(session.id,'FINISH_STREAM');
+  await new Promise(resolve=>setTimeout(resolve,120));
+  assert.deepEqual(events.slice(2).map(event=>event.type),['changed','activity']);
+ }finally{await service.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('a listener that throws does not break the owned session', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-events-throw-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const service=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent'),onEvent:()=>{throw new Error('renderer gone');}});
+ try {
+  const session=await service.createSession({cwd:dir,prompt:'Start',allowFileChanges:true});
+  await service.sendMessage(session.id,'STREAM_PARTIAL');
+  await new Promise(resolve=>setTimeout(resolve,120));
+  await service.sendMessage(session.id,'FINISH_STREAM');
+  assert.equal((await service.listSessions())[0].writable,true);
+ }finally{await service.close();await rm(dir,{recursive:true,force:true});}
 });
