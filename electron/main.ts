@@ -12,7 +12,12 @@ const devURL = !app.isPackaged ? process.env.PRIME_DESKTOP_DEV_URL : undefined;
 if (devURL && devURL !== 'http://127.0.0.1:5173') throw new Error('Unexpected development URL');
 let service: PrimeService;
 let connectionConfig = { executable: '', socketPath: '' };
-function createService() { return new PrimeService({ desktopDir: path.join(app.getPath('userData'), 'owned-sessions'), executable: connectionConfig.executable || undefined, socketPath: connectionConfig.socketPath || undefined }); }
+function createService() {
+  return new PrimeService({ desktopDir: path.join(app.getPath('userData'), 'owned-sessions'), executable: connectionConfig.executable || undefined, socketPath: connectionConfig.socketPath || undefined,
+    // Owned-session output is pushed as it streams; only the trusted main window receives it.
+    onEvent: event => { if (window && !window.isDestroyed()) window.webContents.send('prime:session-event', event); },
+    trash: file => shell.trashItem(file) });
+}
 
 let window: BrowserWindow | null = null;
 let configuring = false;
@@ -44,6 +49,7 @@ function registerIPC() {
   handle('connect', () => service.connect());
   handle('listSessions', () => service.listSessions());
   handle('listModels', () => service.listModels());
+  handle('searchSessions', (query) => service.searchSessions(text(query, 'search', 200)));
   handle('getMessages', (id) => service.getMessages(text(id, 'session ID', 4096)));
   handle('createSession', async (value) => {
     if (configuring) throw new Error('Wait for connection settings to finish changing.');
@@ -68,6 +74,10 @@ function registerIPC() {
   handle('compactSession', (id, instructions) => service.compactSession(text(id, 'session ID', 4096), instructions === undefined || instructions === '' ? undefined : text(instructions, 'instructions', 16 * 1024)));
   handle('renameSession', (id, title) => service.renameSession(text(id, 'session ID', 4096), text(title, 'title', 200)));
   handle('deleteSession', (id) => service.deleteSession(text(id, 'session ID', 4096)));
+  handle('setSessionArchived', (id, archived) => {
+    if (typeof archived !== 'boolean') throw new Error('Invalid archive state');
+    return service.setOwnedArchived(text(id, 'session ID', 4096), archived);
+  });
   handle('chooseDirectory', async () => {
     if (!window) return null;
     const result = await dialog.showOpenDialog(window, { title: 'Choose a workspace', properties: ['openDirectory', 'createDirectory'] });

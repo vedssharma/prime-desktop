@@ -47,15 +47,15 @@ export function allTags(meta: SessionMeta, sessions: Session[]): string[] {
   return [...counts.values()].sort((a, b) => a.localeCompare(b));
 }
 
-export interface GroupOptions { search: string; tag: string; meta: SessionMeta; now?: number }
+export interface GroupOptions { search: string; tag: string; meta: SessionMeta; now?: number; /** Sessions whose conversation text matched the search. */ contentMatches?: ReadonlyMap<string, string> }
 /** Sidebar groups: pinned sessions first, then by date or workspace. Search also matches tags. */
-export function groupSessions(sessions: Session[], { search, tag, meta, now = Date.now() }: GroupOptions): [string, Session[]][] {
+export function groupSessions(sessions: Session[], { search, tag, meta, now = Date.now(), contentMatches }: GroupOptions): [string, Session[]][] {
   const needle = search.toLowerCase();
   const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
   const visible = [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).filter(session => {
     const tags = meta.tags[session.id] ?? [];
     if (tag && !tags.some(item => item.toLowerCase() === tag.toLowerCase())) return false;
-    return `${session.title} ${session.cwd} ${tags.join(' ')}`.toLowerCase().includes(needle);
+    return `${session.title} ${session.cwd} ${tags.join(' ')}`.toLowerCase().includes(needle) || !!contentMatches?.has(session.id);
   });
   const pinned = new Set(meta.pinned);
   const groups = new Map<string, Session[]>();

@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
       connect: async () => ({ connected: true, version: 'test', home: '/tmp' }),
       listSessions: async () => sessions,
       listModels: async () => [{ id: 'test/model', name: 'Test model' }],
-      getMessages: async (id: string) => messages[id] || [],
+      getMessages: async (id: string) => [...(messages[id] || [])], // IPC returns a fresh copy
       createSession: async (input: any) => { log('create', input); const session = { id: 'test-2', title: input.prompt, cwd: input.cwd, model: input.model || '', status: 'idle', createdAt: now, updatedAt: now }; sessions = [session, ...sessions]; messages[session.id] = [{ id: 'new-1', role: 'user', content: input.prompt }]; return session; },
       sendMessage: async (id: string, text: string) => { log('send', id, text); messages[id].push({ id: `msg-${messages[id].length}`, role: 'user', content: text }); },
       interruptSession: async (id: string) => log('interrupt', id),

@@ -292,7 +292,7 @@ test('image prompts require current model capability, preserve follow-up behavio
 });
 
 test('startup resume binds the exact saved identity and startup forks require a new identity', async () => {
-  await fixture(async (original, rpc) => {
+  await fixture(async (original) => {
     await writeFile(original.sessionFile,JSON.stringify({type:'session',id:original.id,cwd:original.cwd})+'\n');
     for(const mode of ['resume','fork'] as const) {
       for(const valid of [true,false]) {

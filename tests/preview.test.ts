@@ -10,7 +10,8 @@ test('browser preview reads as disconnected and refuses every desktop-only actio
   assert.deepEqual(await previewAPI.listSessions(), []);
   assert.deepEqual(await previewAPI.getMessages('any'), []);
   assert.deepEqual(await previewAPI.listModels(), []);
-  const refused = ['configureConnection', 'connect', 'createSession', 'setSessionModel', 'closeOwnedSession', 'resumeOwnedSession', 'forkOwnedSession', 'sendMessage', 'interruptSession', 'getSessionUsage', 'compactSession', 'renameSession', 'deleteSession', 'chooseDirectory', 'openDirectory', 'workspaceList', 'workspaceRead', 'workspaceSave', 'workspaceChanges', 'workspaceDiff'] as const;
+  assert.deepEqual(await previewAPI.searchSessions?.('anything'), []);
+  const refused = ['configureConnection', 'connect', 'createSession', 'setSessionModel', 'closeOwnedSession', 'resumeOwnedSession', 'forkOwnedSession', 'sendMessage', 'interruptSession', 'getSessionUsage', 'compactSession', 'renameSession', 'deleteSession', 'setSessionArchived', 'chooseDirectory', 'openDirectory', 'workspaceList', 'workspaceRead', 'workspaceSave', 'workspaceChanges', 'workspaceDiff'] as const;
   for (const method of refused) await assert.rejects((previewAPI[method] as (...args: unknown[]) => Promise<unknown>)('id', 'value'), /Open Session Dock to connect/, method);
-  assert.deepEqual(Object.keys(previewAPI).filter(key => ![...refused, 'status', 'getConnectionConfig', 'listSessions', 'getMessages', 'listModels', 'copyText', 'saveText', 'notify', 'onNotificationClick'].includes(key)), [], 'new bridge methods need a preview decision');
+  assert.deepEqual(Object.keys(previewAPI).filter(key => ![...refused, 'status', 'getConnectionConfig', 'listSessions', 'getMessages', 'searchSessions', 'listModels', 'copyText', 'saveText', 'notify', 'onNotificationClick'].includes(key)), [], 'new bridge methods need a preview decision');
 });

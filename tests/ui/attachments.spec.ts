@@ -6,7 +6,7 @@ const picker = (page: Page) => page.getByLabel('Choose image attachments');
 const send = (page: Page) => page.getByRole('button',{name:'Send message',exact:true});
 const composer = (page: Page) => page.getByRole('textbox',{name:'Message Prime',exact:true});
 async function open(page: Page) {
-  await page.addInitScript(({image}) => {
+  await page.addInitScript(() => {
     const now = new Date().toISOString();
     const sessions: any[] = ['Alpha','Beta','Shared','Text only'].map((title,index) => ({id:String(index),title,cwd:'/tmp',model:'fixture/vision',status:'idle',createdAt:now,updatedAt:now,ownership:index===2?'shared':'desktop',writable:index!==2,supportsImages:index!==3}));
     const messages: Record<string, any[]> = {};
@@ -14,7 +14,7 @@ async function open(page: Page) {
     (window as any).prime = {
       status:async()=>({connected:true,readOnly:true,canCreateOwned:true,home:'/tmp'}),
       listSessions:async()=>sessions,listModels:async()=>[{id:'fixture/vision',name:'Vision'}],
-      getMessages:async(id:string)=>messages[id]??[],
+      getMessages:async(id:string)=>[...(messages[id]??[])], // IPC returns a fresh copy
       createSession:async(input:any)=>{controls.calls.push(['create',input]);const s={...sessions[0],id:'created',title:'Created'};sessions.push(s);messages.created=[{id:'new',role:'user',content:input.prompt,images:input.images}];return s;},
       sendMessage:(id:string,text:string,images:any[])=>{
         controls.calls.push(['send',id,text,images]);
@@ -25,7 +25,7 @@ async function open(page: Page) {
       },
       setSessionModel:async()=>{},chooseDirectory:async()=>'/tmp',openDirectory:async()=>{},
     };
-  }, {image});
+  });
   await page.goto('/');
   await expect(page.getByRole('button',{name:'Attach images'})).toBeEnabled();
 }
@@ -146,8 +146,7 @@ test('a picker completing after a session switch updates only its originating dr
   await page.evaluate(()=>{
     const decode=HTMLImageElement.prototype.decode;
     HTMLImageElement.prototype.decode=function(){
-      const image=this;
-      return new Promise<void>((resolve,reject)=>{(window as any).__finishImage=()=>{delete(window as any).__finishImage;decode.call(image).then(resolve,reject);};});
+      return new Promise<void>((resolve,reject)=>{(window as any).__finishImage=()=>{delete(window as any).__finishImage;decode.call(this).then(resolve,reject);};});
     };
   });
   await picker(page).setInputFiles(file('late.png'));

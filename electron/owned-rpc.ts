@@ -37,7 +37,7 @@ export type OwnedRpcFactory = (launch: RpcLaunch) => OwnedRpcTransport;
 
 /**
  * A new root owned by one RPC stdin pipe, not a writable daemon selector.
- * Ownership (Prime Agent 0.9.6) is the safety boundary. State checks alone are
+ * Ownership (verified Prime Agent versions, see cli-versions.ts) is the safety boundary. State checks alone are
  * not atomic identity guards. Never add runtime navigation or promotion here.
  * Explicit startup resume/fork is allowed only for verified closed desktop history.
  */

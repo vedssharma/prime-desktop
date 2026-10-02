@@ -1,6 +1,7 @@
 import { historyThroughMessage } from './history-fork.js';
+import { isVerifiedOwnedVersion, parseCliVersion, verifiedVersionsText } from './cli-versions.js';
 import { execFile, spawn } from 'node:child_process';
-import { access, readFile, stat, lstat, realpath, writeFile, unlink } from 'node:fs/promises';
+import { access, stat, lstat, realpath, writeFile, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { OwnedRpcSession, type OwnedRpcStats as SessionUsage } from './owned-rpc.js';
 import { OwnedStore, type OwnedMetadata } from './owned-store.js';
@@ -13,11 +14,35 @@ import { readBoundedFile, isRecord } from './bounded-io.js';
 import { promptCommand, validateImages, supportsImages, type ImageAttachment } from './attachments.js';
 
 const exec = promisify(execFile);
-interface Session { supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
+interface Session { archived?: boolean; supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
 interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; images?: ImageAttachment[]; }
 interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[]; }
-interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord; }
-export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; }
+interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord; streamTimer?: ReturnType<typeof setTimeout>; }
+/**
+ * Pushed to the renderer for desktop-owned sessions. `stream` carries the in-progress assistant
+ * reply (already normalized) so the UI can patch it in place; `changed` means the transcript gained
+ * a whole message; `activity` means a run started or ended. Polling stays the source of truth.
+ */
+export type SessionEvent =
+  | { type: 'stream'; sessionId: string; streamId: string; messages: Message[] }
+  | { type: 'changed' | 'activity'; sessionId: string };
+export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; onEvent?: (event: SessionEvent) => void;
+  /** Moves a closed desktop transcript to the OS trash when it is deleted. Without it, deletion is refused. */
+  trash?: (file: string) => Promise<void>; }
+/** How often a streaming reply is pushed to the renderer at most. Token events can arrive far faster. */
+const STREAM_INTERVAL_MS = 50;
+/** Parsed saved transcripts kept for switching between recent sessions. */
+const TRANSCRIPT_CACHE_ENTRIES = 6;
+/** Text kept for full-text search across every saved transcript. */
+const SEARCH_CACHE_BYTES = 32 * 1024 * 1024;
+export interface SearchMatch { id: string; snippet: string }
+type TranscriptCache = Map<string, { key: string; messages: Message[]; size: number }>;
+
+/** A short single-line excerpt centered on the first match. */
+export function snippetAround(content: string, index: number, length: number, radius = 48): string {
+  const start = Math.max(0, index - radius), end = Math.min(content.length, index + length + radius);
+  return `${start > 0 ? '…' : ''}${content.slice(start, end).replace(/\s+/g, ' ').trim()}${end < content.length ? '…' : ''}`;
+}
 
 function text(value: unknown): string { return typeof value === 'string' ? value : ''; }
 function date(value: unknown): string | undefined {
@@ -36,10 +61,23 @@ export function normalizeSession(raw: WireRecord): Session {
   };
 }
 
+/**
+ * Live RPC messages have no IDs. Derive them from role and timestamp, not list position, so a
+ * streamed reply keeps the same ID (and React key) once it lands in a full transcript read.
+ */
+function fallbackId(message: WireRecord, index: number, seen: Map<string, number>): string {
+  if (message.timestamp === undefined || message.timestamp === null) return `${message.role}-${index}-${index}`;
+  const key = `${message.role}-${message.timestamp}`;
+  const count = (seen.get(key) ?? 0) + 1;
+  seen.set(key, count);
+  return count === 1 ? key : `${key}-${count}`;
+}
+
 export function normalizeMessages(messages: WireRecord[]): Message[] {
   const output: Message[] = [];
+  const seen = new Map<string, number>();
   messages.forEach((message, index) => {
-    const id = text(message.id) || `${message.role}-${message.timestamp ?? index}-${index}`;
+    const id = text(message.id) || fallbackId(message, index, seen);
     const timestamp = date(message.timestamp);
     if (message.role === 'custom' && message.display === false) return;
     const role: Message['role'] = message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : ['toolResult', 'bashExecution'].includes(message.role) ? 'tool' : 'system';
@@ -107,7 +145,8 @@ export class PrimeService {
   private options: PrimeOptions;
   private home: string;
   private executable?: string;
-  private transcriptCache?: { key: string; messages: Message[] };
+  private transcriptCache: TranscriptCache = new Map();
+  private searchCache: TranscriptCache = new Map();
   private modelsLoading?: Promise<{ id: string; name: string }[]>;
   constructor(options: PrimeOptions = {}) {
     this.options = options;
@@ -137,8 +176,11 @@ export class PrimeService {
     if (!this.ownedVersion) this.ownedVersion = (async () => {
       try {
         const { stdout, stderr } = await exec(await this.cli(), ['--version'], { timeout: 5000, maxBuffer: 8192 });
-        return /(?:^|\s)0\.9\.6(?:\s|$)/.test(`${stdout}\n${stderr}`.trim()) ? { allowed: true, checkedAt: Date.now() } : { allowed: false, reason: 'Desktop-owned sessions currently require verified Prime Agent 0.9.6. Shared sessions remain read-only.', checkedAt: Date.now() };
-      } catch { return { allowed: false, reason: 'Install Prime Agent 0.9.6 or check the CLI executable path in Settings.', checkedAt: Date.now() }; }
+        const version = parseCliVersion(`${stdout}\n${stderr}`);
+        if (isVerifiedOwnedVersion(version)) return { allowed: true, checkedAt: Date.now() };
+        const found = version ? `Prime Agent ${version} is installed. ` : '';
+        return { allowed: false, reason: `${found}Desktop-owned sessions currently require verified Prime Agent ${verifiedVersionsText()}. Shared sessions remain read-only.`, checkedAt: Date.now() };
+      } catch { return { allowed: false, reason: `Install Prime Agent ${verifiedVersionsText()} or check the CLI executable path in Settings.`, checkedAt: Date.now() }; }
     })();
     return this.ownedVersion;
   }
@@ -147,7 +189,7 @@ export class PrimeService {
       status: entry.error ? 'error' : entry.state?.isStreaming || entry.state?.isCompacting || entry.state?.unfinishedActionCount > 0 ? 'running' : 'idle',
       ...(Number.isSafeInteger(entry.state?.sessionActions?.queuedCount) && entry.state!.sessionActions.queuedCount >= 0 ? { queuedCount: entry.state!.sessionActions.queuedCount } : {}),
       ...(entry.state?.model ? { supportsImages: supportsImages(entry.state.model) } : {}),
-      ownership: 'desktop', writable: !!entry.rpc?.alive && !this.closing, lifecycle: entry.rpc?.alive ? 'open' : 'closed' };
+      ownership: 'desktop', writable: !!entry.rpc?.alive && !this.closing, lifecycle: entry.rpc?.alive ? 'open' : 'closed', ...(entry.metadata.archived ? { archived: true } : {}) };
   }
   private async liveOwned(id: string) {
     await this.initializeOwned();
@@ -235,21 +277,60 @@ export class PrimeService {
     }
     // Runtime IDs are reusable, so use the catalog's persisted file and verify its header.
     const raw = entry ? { sessionFile: entry.metadata.sessionFile } : await this.lookup(id, true);
-    const expectedId = entry?.metadata.sessionId ?? id;
-    if (!raw.sessionFile) throw new Error('This session has no saved transcript. Open it in the CLI.');
-    const metadata = await stat(raw.sessionFile);
-    const cacheKey = JSON.stringify([id, raw.sessionFile, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs]);
-    if (this.transcriptCache?.key === cacheKey) return this.transcriptCache.messages;
+    return this.readSaved(id, raw.sessionFile, entry?.metadata.sessionId ?? id, this.transcriptCache, entries => entries > TRANSCRIPT_CACHE_ENTRIES);
+  }
+  /**
+   * Parse a saved transcript after checking its header names the expected session. Results are
+   * cached by file identity, size and timestamps, so an unchanged file is never re-read.
+   */
+  private async readSaved(id: string, file: unknown, expectedId: string, cache: TranscriptCache, full: (entries: number, bytes: number) => boolean): Promise<Message[]> {
+    if (typeof file !== 'string' || !file) throw new Error('This session has no saved transcript. Open it in the CLI.');
+    const metadata = await stat(file);
+    const cacheKey = JSON.stringify([file, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs]);
+    const hit = cache.get(id);
+    if (hit?.key === cacheKey) { cache.delete(id); cache.set(id, hit); return hit.messages; }
     if (metadata.size > 64 * 1024 * 1024) throw new Error('This saved transcript exceeds the 64 MiB desktop limit. Open it in the CLI.');
-    const contents = await readBoundedFile(raw.sessionFile);
+    const contents = await readBoundedFile(file);
     let header: WireRecord;
     try { header = JSON.parse(contents.split('\n', 1)[0]); }
     catch { throw new Error('Invalid saved session header.'); }
     if (header?.type !== 'session' || header.id !== expectedId) throw new Error('Session identity mismatch. Refusing to display another conversation.');
     if (contents.split('\n').slice(1).some(line => { try { return JSON.parse(line)?.type === 'session'; } catch { return false; } })) throw new Error('Multiple session headers. Refusing an ambiguous transcript.');
     const messages = normalizeMessages(parseSavedTranscript(contents));
-    this.transcriptCache = { key: cacheKey, messages };
+    cache.delete(id);
+    cache.set(id, { key: cacheKey, messages, size: messages.reduce((total, message) => total + message.content.length * 2, 0) });
+    let bytes = [...cache.values()].reduce((total, item) => total + item.size, 0);
+    // Least recently used first; always keep the transcript just read.
+    for (const [oldest, item] of cache) {
+      if (cache.size <= 1 || !full(cache.size, bytes)) break;
+      cache.delete(oldest); bytes -= item.size;
+    }
     return messages;
+  }
+  /**
+   * Sessions whose saved conversation text contains `query` (case-insensitive), with a short excerpt.
+   * Reads only transcripts the catalog or desktop storage already names, with the same identity
+   * checks and 64 MiB limit as opening them. Unreadable transcripts are skipped.
+   */
+  async searchSessions(query: string): Promise<SearchMatch[]> {
+    const needle = query.trim().toLowerCase();
+    if (needle.length < 2) return [];
+    const sessions = await this.listSessions();
+    const matches: SearchMatch[] = [];
+    for (const session of sessions) {
+      const entry = this.owned.get(session.id);
+      let messages: Message[];
+      try {
+        messages = entry?.rpc?.alive && entry.messages ? entry.messages
+          : await this.readSaved(session.id, entry ? entry.metadata.sessionFile : this.sessions.get(session.id)?.sessionFile, entry?.metadata.sessionId ?? session.id, this.searchCache, (_entries, bytes) => bytes > SEARCH_CACHE_BYTES);
+      } catch { continue; }
+      for (const message of messages) {
+        const index = message.content.toLowerCase().indexOf(needle);
+        if (index !== -1) { matches.push({ id: session.id, snippet: snippetAround(message.content, index, needle.length) }); break; }
+      }
+      if (matches.length >= 100) break;
+    }
+    return matches;
   }
   async listModels(): Promise<{ id: string; name: string }[]> {
     if (!this.modelsLoading) this.modelsLoading = this.loadModels().finally(() => { this.modelsLoading = undefined; });
@@ -260,7 +341,9 @@ export class PrimeService {
     // Unlike get_available_models this works even with no active sessions.
     const { stdout } = await exec(await this.cli(), ['model', 'list'], { timeout: 30_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' } });
     const models: { id: string; name: string }[] = [];
-    for (const line of stdout.replace(/\x1b\[[0-9;]*m/g, '').split('\n')) {
+    // Strip ANSI color codes before parsing columns.
+    // eslint-disable-next-line no-control-regex
+    for (const line of stdout.replace(/\u001b\[[0-9;]*m/g, '').split('\n')) {
       const match = line.trim().match(/^(\S+)\s+(\S+)\s+[\d.]+[KMB]?\s+/);
       if (match) models.push({ id: `${match[1]}/${match[2]}`, name: `${match[2]} · ${match[1]}` });
     }
@@ -281,13 +364,31 @@ export class PrimeService {
     this.creations.add(task);
     try { return await task; } finally { this.creations.delete(task); }
   }
+  private emit(event: SessionEvent) {
+    try { this.options.onEvent?.(event); } catch { /* A renderer that went away must not break the RPC event loop. */ }
+  }
+  /** Push the streaming reply at most every STREAM_INTERVAL_MS; the latest text wins. */
+  private scheduleStream(entry: OwnedEntry) {
+    if (entry.streamTimer || !this.options.onEvent) return;
+    entry.streamTimer = setTimeout(() => {
+      entry.streamTimer = undefined;
+      const streaming = entry.streaming;
+      if (!streaming || !entry.rpc?.alive) return;
+      const messages = normalizeMessages([streaming]);
+      this.emit({ type: 'stream', sessionId: entry.metadata.id, streamId: text(streaming.id) || fallbackId(streaming, 0, new Map()), messages });
+    }, STREAM_INTERVAL_MS);
+  }
+  private endStream(entry: OwnedEntry) {
+    entry.streaming = undefined;
+    clearTimeout(entry.streamTimer); entry.streamTimer = undefined;
+  }
   private observeOwned(entry: OwnedEntry) {
     const metadata = entry.metadata;
     entry.rpc!.onEvent(event => {
-      if (event.type === 'agent_start') (entry.state ??= {}).isStreaming = true;
-      if (event.type === 'agent_end') { (entry.state ??= {}).isStreaming = false; entry.streaming = undefined; }
-      if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') entry.streaming = event.message;
-      if (event.type === 'message_end') entry.streaming = undefined;
+      if (event.type === 'agent_start') { (entry.state ??= {}).isStreaming = true; this.emit({ type: 'activity', sessionId: metadata.id }); }
+      if (event.type === 'agent_end') { (entry.state ??= {}).isStreaming = false; this.endStream(entry); this.emit({ type: 'activity', sessionId: metadata.id }); }
+      if ((event.type === 'message_update' || event.type === 'message_start') && isRecord(event.message) && event.message.role === 'assistant') { entry.streaming = event.message; this.scheduleStream(entry); }
+      if (event.type === 'message_end') { this.endStream(entry); this.emit({ type: 'changed', sessionId: metadata.id }); }
       metadata.updatedAt = new Date().toISOString();
       // Persist activity at the end of each run so history sorts correctly after a relaunch.
       if (event.type === 'agent_end') void this.persistActivity(metadata);
@@ -303,7 +404,7 @@ export class PrimeService {
       await this.initializeOwned();
       const source = this.owned.get(id);
       if (!source) return this.assertWritable();
-      if (!(await this.ownedSupport()).allowed) throw Error('Opening saved sessions requires verified Prime Agent 0.9.6.');
+      if (!(await this.ownedSupport()).allowed) throw Error(`Opening saved sessions requires verified Prime Agent ${verifiedVersionsText()}.`);
       if (consent !== true) throw Error('Confirm workspace trust before opening saved history.');
       if (source.rpc?.alive) throw Error('Close the desktop session before resuming or forking its saved history.');
       await source.rpc?.close();
@@ -344,7 +445,8 @@ export class PrimeService {
         if (this.closing) throw Error('Desktop closed before saved history opened.');
         const now = new Date().toISOString();
         const metadata: OwnedMetadata = mode === 'resume'
-          ? {...source.metadata, model:[state.model?.provider,state.model?.id].filter(Boolean).join('/'), updatedAt:now}
+          // A resumed session is live again, so it comes out of the archive.
+          ? {...source.metadata, archived:undefined, model:[state.model?.provider,state.model?.id].filter(Boolean).join('/'), updatedAt:now}
           : {id:`desktop-${randomUUID()}`,sessionId:rpc.id,sessionFile:rpc.sessionFile,title:`Fork of ${source.metadata.title}`.slice(0,200),cwd,model:[state.model?.provider,state.model?.id].filter(Boolean).join('/'),createdAt:now,updatedAt:now};
         await this.store!.save(metadata);
         const entry: OwnedEntry = {metadata,rpc,state};
@@ -408,9 +510,39 @@ export class PrimeService {
   async closeOwnedSession(id: string): Promise<void> {
     await this.initializeOwned(); const entry = this.owned.get(id); if (!entry) return this.assertWritable();
     if (this.openingHistory.has(id)) throw Error('Wait until this saved session finishes opening.');
-    await entry.rpc?.close(); entry.rpc = undefined; entry.state = {}; await this.store!.save(entry.metadata);
+    this.endStream(entry); await entry.rpc?.close(); entry.rpc = undefined; entry.state = {}; await this.store!.save(entry.metadata);
   }
-  async deleteSession(_id: string): Promise<void> { return this.assertWritable(); }
+  /** Closed desktop history only: it lives in app storage, so the shared-daemon identity race does not apply. */
+  private async closedOwned(id: string, action: string) {
+    await this.initializeOwned();
+    const entry = this.owned.get(id);
+    if (!entry) return this.assertWritable();
+    if (entry.rpc?.alive) throw Error(`Close the desktop session before you ${action} it.`);
+    if (this.openingHistory.has(id)) throw Error('Wait until this saved session finishes opening.');
+    return entry;
+  }
+  async setOwnedArchived(id: string, archived: boolean): Promise<void> {
+    const entry = await this.closedOwned(id, archived ? 'archive' : 'unarchive');
+    const metadata = { ...entry.metadata };
+    if (archived) metadata.archived = true; else delete metadata.archived;
+    await this.store!.save(metadata);
+    entry.metadata = metadata;
+  }
+  /** Moves the saved transcript to the OS trash, then forgets the record. Workspace files are never touched. */
+  async deleteSession(id: string): Promise<void> {
+    const entry = await this.closedOwned(id, 'delete');
+    if (!this.options.trash) throw Error('Deleting saved desktop history is not available here.');
+    const file = entry.metadata.sessionFile;
+    // Only ever trash a regular file inside desktop storage, never a path a record was edited to point at.
+    const stats = await lstat(file).catch(error => { if (error?.code === 'ENOENT') return undefined; throw error; });
+    if (stats) {
+      if (!stats.isFile() || dirname(await realpath(file)) !== await realpath(this.store!.transcripts)) throw Error('Saved history must be a regular file inside desktop storage.');
+      await this.options.trash(file);
+    }
+    await this.store!.remove(entry.metadata.id);
+    this.owned.delete(id);
+    this.transcriptCache.delete(id); this.searchCache.delete(id);
+  }
   close(): Promise<void> {
     if (this.closingPromise) return this.closingPromise;
     this.closing = true; this.transport.close();

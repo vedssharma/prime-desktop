@@ -19,7 +19,10 @@ import { allTags, groupSessions, loadSessionMeta, saveSessionMeta, togglePin, ty
 import { readImageFiles, type DraftImage } from './attachments';
 import { validateImages, promptCommand } from '../electron/attachments';
 import { errorText, folderName } from './format';
-import { isElectron, newSessionShortcut } from './platform';
+import { findShortcut, isElectron, newSessionShortcut } from './platform';
+import { mergeStream } from './stream';
+import FindBar from './FindBar';
+import { loadKeepDrafts, loadSavedDrafts, saveDrafts, saveKeepDrafts } from './drafts';
 import DockMark from './DockMark';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
@@ -39,7 +42,17 @@ export default function App() {
   const [visibleMessages, setVisibleMessages] = useState(100);
   const [search, setSearch] = useState('');
   const [preferences] = useState(loadPreferences);
-  const [drafts, setDrafts] = useState<Record<string, { text: string; images: DraftImage[]; revision: number; attachmentError?: string }>>({});
+  const [keepDrafts, setKeepDrafts] = useState(loadKeepDrafts);
+  const [draftStorageError, setDraftStorageError] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, { text: string; images: DraftImage[]; revision: number; attachmentError?: string }>>(() => keepDrafts
+    ? Object.fromEntries(Object.entries(loadSavedDrafts()).map(([key, text]) => [key, { text, images: [], revision: 0 }])) : {});
+  useEffect(() => {
+    if (!keepDrafts) return;
+    // Debounced so typing does not write storage on every keystroke.
+    const timer = setTimeout(() => setDraftStorageError(!saveDrafts(drafts)), 400);
+    return () => clearTimeout(timer);
+  }, [drafts, keepDrafts]);
+  const changeKeepDrafts = (enabled: boolean) => { setKeepDrafts(enabled); setDraftStorageError(!saveKeepDrafts(enabled)); };
   const draftKey = activeId ?? 'new-session';
   const draftEntry = drafts[draftKey];
   const draft = draftEntry?.text ?? '';
@@ -83,9 +96,13 @@ export default function App() {
   useEffect(() => {
     if (!drawerOpen) return;
     sidebarRef.current?.querySelector<HTMLButtonElement>('.mobile-close')?.focus();
-    return () => { sidebarToggle.current?.focus(); };
+    const toggle = sidebarToggle.current;
+    return () => { toggle?.focus(); };
   }, [drawerOpen]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  // Bumped to re-focus the find field when Cmd/Ctrl+F is pressed while it is already open.
+  const [findFocus, setFindFocus] = useState(0);
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   const dialogRef = useRef(dialog);
   dialogRef.current = dialog;
@@ -122,7 +139,8 @@ export default function App() {
   const followBottom = useRef(true);
   // Mirrors followBottom for rendering: offer a way back when the user has scrolled away from new output.
   const [showJump, setShowJump] = useState(false);
-  const setFollow = (value: boolean) => { followBottom.current = value; setShowJump(!value); };
+  // Stable callbacks below let the memoized sidebar and conversation skip re-rendering on each draft keystroke.
+  const setFollow = useCallback((value: boolean) => { followBottom.current = value; setShowJump(!value); }, []);
   // Content growing below the viewport is not the user scrolling away; only an upward scroll stops following.
   const lastScrollTop = useRef(0);
   const activeIdRef = useRef(activeId);
@@ -135,7 +153,10 @@ export default function App() {
   const canAttach = active ? active.ownership === 'desktop' && active.writable === true && active.supportsImages !== false : connection?.canCreateOwned === true;
   const attachmentReason = active?.supportsImages === false ? 'Choose an image-capable model to attach images.' : 'Images are available in writable desktop-owned sessions.';
   const runningRef = useRef(running); runningRef.current = running;
-  const conversationItems = groupConversation(messages.slice(-visibleMessages));
+  // Desktop-owned sessions push streamed output, so their transcript poll is only a safety net.
+  const pushed = active?.ownership === 'desktop' && typeof window.prime.onSessionEvent === 'function';
+  const pushedRef = useRef(pushed); pushedRef.current = pushed;
+  const conversationItems = useMemo(() => groupConversation(messages.slice(-visibleMessages)), [messages, visibleMessages]);
   const currentCwd = active?.cwd || cwd;
   const refresh = useCallback(async () => { const list = await window.prime.listSessions(); setSessions(list); }, []);
   const messageRead = useRef(0);
@@ -200,7 +221,7 @@ export default function App() {
 
   useEffect(() => {
     // Errors belong to the view that caused them; do not carry them into another session.
-    setMessages([]); setVisibleMessages(100); setError(''); setFollow(true); knownIds.current = null;
+    setMessages([]); setVisibleMessages(100); setError(''); setFollow(true); knownIds.current = null; setFindOpen(false);
     // Swapping content clamps scrollTop; that is not the user scrolling up, so reset the baseline.
     lastScrollTop.current = 0;
     if (!activeId) { setLoadingMessages(false); return; }
@@ -210,13 +231,15 @@ export default function App() {
     async function poll() {
       try { await readMessages(activeId!); }
       catch (err) { if (!cancelled) setError(errorText(err)); }
-      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, runningRef.current ? 600 : 10000); } }
+      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, runningRef.current ? pushedRef.current ? 3000 : 600 : 10000); } }
     }
     // A run that starts while the idle timer is pending must not wait out the idle delay.
     pollMessagesNow.current = () => { if (!cancelled) { clearTimeout(timer); void poll(); } };
     void poll();
+    // messageRead is a request counter, not a DOM node: bumping its live value invalidates in-flight reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     return () => { cancelled = true; ++messageRead.current; clearTimeout(timer); pollMessagesNow.current = () => {}; };
-  }, [activeId, readMessages]);
+  }, [activeId, readMessages, setFollow]);
 
   useEffect(() => { if (followBottom.current && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }, [messages, running, loadingMessages]);
   useEffect(() => { if (running) pollMessagesNow.current(); }, [running]);
@@ -231,7 +254,7 @@ export default function App() {
   useEffect(() => { if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 190)}px`; } }, [draft]);
   const newSession = useCallback(() => { setActiveId(null); setAllowFileChanges(false); setSidebarOpen(false); setMenuOpen(false); setTimeout(() => { if (!dialogRef.current && activeIdRef.current === null) textarea.current?.focus(); }, 50); }, []);
   useEffect(() => {
-    const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); if (!dialogRef.current) newSession(); } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (dialogRef.current === 'palette') setDialog(null); else if (!dialogRef.current) { setSidebarOpen(false); setMenuOpen(false); setDialog('palette'); } } if (event.key === 'Escape') { if (dialogPendingRef.current) return; setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
+    const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); if (!dialogRef.current) newSession(); } if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); if (!dialogRef.current && activeIdRef.current) { setFindOpen(true); setFindFocus(count => count + 1); } } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (dialogRef.current === 'palette') setDialog(null); else if (!dialogRef.current) { setSidebarOpen(false); setMenuOpen(false); setDialog('palette'); } } if (event.key === 'Escape') { if (dialogPendingRef.current) return; setDialog(null); setMenuOpen(false); setSidebarOpen(false); } };
     window.addEventListener('keydown', keydown); return () => window.removeEventListener('keydown', keydown);
   }, [newSession]);
 
@@ -243,6 +266,12 @@ export default function App() {
     }
     lastStatuses.current = new Map(sessions.map(session => [session.id, session.status]));
   }, [sessions]);
+  useEffect(() => window.prime.onSessionEvent?.(event => {
+    if (event.type === 'activity') void refresh().catch(() => {});
+    if (event.sessionId !== activeIdRef.current) return;
+    if (event.type === 'stream') setMessages(previous => mergeStream(previous, event.streamId, event.messages));
+    else pollMessagesNow.current();
+  }), [refresh]);
   useEffect(() => window.prime.onNotificationClick?.(id => { if (!dialogRef.current) { setActiveId(id); setSidebarOpen(false); setMenuOpen(false); } }), []);
 
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -250,18 +279,40 @@ export default function App() {
   const [tagFilter, setTagFilter] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [metaStorageError, setMetaStorageError] = useState(false);
-  const updateMeta = (next: SessionMeta) => { setMeta(next); setMetaStorageError(!saveSessionMeta(next)); };
-  const grouped = useMemo(() => groupSessions(sessions, { search, tag: tagFilter, meta }), [sessions, search, tagFilter, meta]);
+  const updateMeta = useCallback((next: SessionMeta) => { setMeta(next); setMetaStorageError(!saveSessionMeta(next)); }, []);
+  const [showArchived, setShowArchived] = useState(false);
+  // Conversation-text matches for the sidebar search, keyed by session ID with an excerpt.
+  const [contentMatches, setContentMatches] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    const query = search.trim();
+    if (query.length < 2 || !window.prime.searchSessions) { setContentMatches(new Map()); return; }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void window.prime.searchSessions!(query)
+        .then(found => { if (!cancelled) setContentMatches(new Map(found.map(match => [match.id, match.snippet]))); })
+        .catch(() => { if (!cancelled) setContentMatches(new Map()); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [search]);
+  const archivedCount = useMemo(() => sessions.filter(session => session.archived).length, [sessions]);
+  const grouped = useMemo(() => groupSessions(showArchived ? sessions : sessions.filter(session => !session.archived), { search, tag: tagFilter, meta, contentMatches }), [sessions, showArchived, search, tagFilter, meta, contentMatches]);
+  // Closed desktop history lives in app storage, so it can be archived or deleted without touching shared CLI sessions.
+  const closedOwned = active?.ownership === 'desktop' && active.lifecycle === 'closed';
   const commands: Command[] = dialog === 'palette' ? [
     { id: 'new', label: 'New session', group: 'Actions', detail: newSessionShortcut, run: newSession },
     { id: 'settings', label: 'Open settings', group: 'Actions', keywords: 'appearance theme providers models connection preferences', run: () => setDialog('settings') },
     { id: 'about', label: 'About Session Dock', group: 'Actions', keywords: 'help shortcuts version', run: () => setDialog('about') },
+    ...(active ? [{ id: 'find', label: 'Find in conversation', group: 'Actions' as const, detail: findShortcut, keywords: 'search text', run: () => { setFindOpen(true); setFindFocus(count => count + 1); } }] : []),
     ...(active ? [{ id: 'workspace', label: workspaceOpen ? 'Hide workspace files and changes' : 'Show workspace files and changes', group: 'Actions' as const, keywords: 'git diff explorer folder', run: () => setWorkspaceOpen(!workspaceOpen) }] : []),
     { id: 'reconnect', label: 'Reconnect to Prime Agent', group: 'Actions', keywords: 'connect start service', run: () => void reconnect() },
     { id: 'group', label: meta.groupBy === 'date' ? 'Group sessions by workspace' : 'Group sessions by date', group: 'Actions', keywords: 'sidebar organize', run: () => updateMeta({ ...meta, groupBy: meta.groupBy === 'date' ? 'workspace' : 'date' }) },
     ...(active ? [
       { id: 'pin', label: meta.pinned.includes(active.id) ? 'Unpin this session' : 'Pin this session', group: 'Actions' as const, run: () => updateMeta(togglePin(meta, active.id)) },
       { id: 'tags', label: 'Edit tags for this session', group: 'Actions' as const, run: () => { setTagInput((meta.tags[active.id] ?? []).join(', ')); setDialog('tags'); } },
+      ...(closedOwned ? [
+        { id: 'archive', label: active.archived ? 'Unarchive this session' : 'Archive this session', group: 'Actions' as const, keywords: 'hide remove clean up', run: () => void setArchived(!active.archived) },
+        { id: 'delete', label: 'Delete this session', group: 'Actions' as const, keywords: 'remove trash', run: () => setDialog('delete') },
+      ] : []),
       ...(readOnly ? [] : [{ id: 'rename', label: 'Rename this session', group: 'Actions' as const, run: () => { setRenameTitle(active.title); setDialog('rename'); } }]),
       ...(running && !readOnly ? [{ id: 'stop', label: 'Stop generation', group: 'Actions' as const, run: () => void stop() }] : []),
       ...(messages.length ? [
@@ -271,12 +322,12 @@ export default function App() {
       ] : []),
       { id: 'reveal', label: 'Reveal workspace folder', group: 'Actions' as const, detail: folderName(active.cwd), run: () => void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))) },
     ] : []),
-    ...[...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(session => ({ id: `go-${session.id.replace(/[^\w-]/g, '_')}`, label: `Go to: ${session.title || 'Untitled session'}`, group: 'Sessions' as const, detail: folderName(session.cwd), keywords: (meta.tags[session.id] ?? []).join(' '), run: () => { setActiveId(session.id); setSidebarOpen(false); setMenuOpen(false); } })),
+    ...[...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(session => ({ id: `go-${session.id.replace(/[^\w-]/g, '_')}`, label: `Go to: ${session.title || 'Untitled session'}${session.archived ? ' (archived)' : ''}`, group: 'Sessions' as const, detail: folderName(session.cwd), keywords: (meta.tags[session.id] ?? []).join(' '), run: () => { setActiveId(session.id); setSidebarOpen(false); setMenuOpen(false); } })),
   ] : [];
   const knownTags = useMemo(() => allTags(meta, sessions), [meta, sessions]);
   useEffect(() => { if (tagFilter && !knownTags.some(tag => tag.toLowerCase() === tagFilter.toLowerCase())) setTagFilter(''); }, [knownTags, tagFilter]);
 
-  async function reconnect() {
+  const reconnect = useCallback(async () => {
     setConnecting(true); setError('');
     try { const status = await window.prime.connect(); setConnection(status); setCwd(previous => previous || status.home); if (status.connected) {
         const [list, choices] = await Promise.allSettled([window.prime.listSessions(), window.prime.listModels()]);
@@ -286,7 +337,7 @@ export default function App() {
         else setError(`Model discovery: ${errorText(choices.reason)}`);
       } else setError(status.error || 'Could not connect to Prime Agent. Check that the CLI is installed and authenticated.'); }
     catch (err) { setError(errorText(err)); } finally { setConnecting(false); }
-  }
+  }, []);
   async function chooseFolder() { try { const folder = await window.prime.chooseDirectory(); if (folder) setCwd(folder); } catch (err) { setError(errorText(err)); } }
   async function addImages(files: File[]) {
     if (!canAttach || readingKeys.current.has(draftKey)) return;
@@ -377,6 +428,16 @@ export default function App() {
     try { await window.prime.interruptSession(target); await refresh(); }
     catch (err) { setError(errorText(err)); } finally { setPendingFor(target, false); }
   }
+  async function setArchived(archived: boolean) {
+    if (!active || !closedOwned || pendingKeys.current.has(active.id)) return;
+    const id = active.id; setMenuOpen(false); setPendingFor(id, true); setError('');
+    try {
+      await window.prime.setSessionArchived(id, archived);
+      await refresh();
+      setNotices(previous => ({ ...previous, [id]: archived ? 'Session archived. It is hidden from the sidebar unless archived sessions are shown.' : 'Session restored to the sidebar.' }));
+    } catch (err) { if (activeIdRef.current === id) setError(`${archived ? 'Archive' : 'Unarchive'} session: ${errorText(err)}`); }
+    finally { setPendingFor(id, false); }
+  }
   const [forkEntryId, setForkEntryId] = useState('');
   function showHistoryAction(operation: 'resume-owned' | 'fork-owned') {
     setForkEntryId(''); setHistoryConsent(false); setError(''); setMenuOpen(false); setDialog(operation);
@@ -403,8 +464,8 @@ export default function App() {
   }
   async function confirmDialog(event: FormEvent) {
     event.preventDefault();
-    if (!activeId || dialogPendingRef.current || readOnly) return;
     const target = activeId, operation = dialog;
+    if (!target || dialogPendingRef.current || (readOnly && !(operation === 'delete' && closedOwned))) return;
     dialogPendingRef.current = true; setDialogPending(true);
     try {
       if (operation === 'close-owned') { await window.prime.closeOwnedSession(target); } else if (operation === 'delete') {
@@ -422,24 +483,25 @@ export default function App() {
   }
 
   return <div className={`app-shell ${isElectron ? 'electron' : 'browser-preview'}`}>
-    <Sidebar sidebarRef={sidebarRef} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} dialog={dialog} narrow={narrow} drawerOpen={drawerOpen} newSession={newSession} search={search} setSearch={setSearch} sessions={sessions} grouped={grouped} loading={loading} activeId={activeId} setActiveId={setActiveId} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} metaStorageError={metaStorageError} knownTags={knownTags} tagFilter={tagFilter} setTagFilter={setTagFilter} connection={connection} connecting={connecting} reconnect={reconnect} setDialog={setDialog} />
+    <Sidebar sidebarRef={sidebarRef} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} dialog={dialog} narrow={narrow} drawerOpen={drawerOpen} newSession={newSession} search={search} setSearch={setSearch} contentMatches={contentMatches} sessions={sessions} grouped={grouped} loading={loading} archivedCount={archivedCount} showArchived={showArchived} setShowArchived={setShowArchived} activeId={activeId} setActiveId={setActiveId} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} metaStorageError={metaStorageError} knownTags={knownTags} tagFilter={tagFilter} setTagFilter={setTagFilter} connection={connection} connecting={connecting} reconnect={reconnect} setDialog={setDialog} />
     <main inert={!!dialog || drawerOpen} className="main-panel">
-      <Topbar sidebarToggle={sidebarToggle} setSidebarOpen={setSidebarOpen} active={active} running={running} readOnly={readOnly} pending={pending} connection={connection} messages={messages} workspaceOpen={workspaceOpen} setWorkspaceOpen={setWorkspaceOpen} menuOpen={menuOpen} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} setTagInput={setTagInput} setRenameTitle={setRenameTitle} setDialog={setDialog} setError={setError} exportConversation={exportConversation} showHistoryAction={showHistoryAction} />
+      <Topbar sidebarToggle={sidebarToggle} setSidebarOpen={setSidebarOpen} active={active} running={running} readOnly={readOnly} pending={pending} connection={connection} messages={messages} workspaceOpen={workspaceOpen} setWorkspaceOpen={setWorkspaceOpen} menuOpen={menuOpen} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} setTagInput={setTagInput} setRenameTitle={setRenameTitle} setDialog={setDialog} setError={setError} exportConversation={exportConversation} showHistoryAction={showHistoryAction} setArchived={setArchived} />
       {active && <div className="session-context"><button onClick={() => void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err)))} title={active.cwd}><Folder size={13} /><span>{active.cwd}</span></button><span className="context-separator" /><span><Zap size={12} />{active.model || 'CLI default'}</span></div>}
-      {active?.ownership === 'desktop' && <div className="offline-banner">Desktop-owned · {active.lifecycle === 'open' ? 'Tools can change files. Quitting stops this session. Model changes may update CLI defaults.' : 'Closed — saved history is read-only.'}</div>}
+      {active?.ownership === 'desktop' && <div className="offline-banner">Desktop-owned · {active.lifecycle === 'open' ? 'Tools can change files. Quitting stops this session. Model changes may update CLI defaults.' : `Closed — saved history is read-only.${active.archived ? ' Archived: hidden from the sidebar.' : ''}`}</div>}
       {active && <details className="queue-status"><summary>Work &amp; queue status</summary><p>{running ? 'Agent reports active work.' : 'Agent reports no active work.'} {pending ? 'A desktop request is awaiting confirmation.' : 'No desktop request is pending for this session.'}</p>{typeof active.queuedCount === 'number' ? <p>Agent reports {active.queuedCount === 0 ? 'no queued follow-ups' : `${active.queuedCount} queued follow-up${active.queuedCount === 1 ? '' : 's'}`}. Queued message text, ordering and cancellation are not available through this connection.</p> : <p>Authoritative queue details are unavailable with this daemon protocol. This is not an empty-queue report. View, edit, or cancel queued work in the CLI.</p>}{active.ownership === 'desktop' && active.writable && <SessionUsage key={active.id} sessionId={active.id} idle={!running && !pending && !active.queuedCount} onCompacted={() => void refresh()} onError={message => { if (activeIdRef.current === active.id) setError(message); }} />}</details>}
       {preferencesError && <div className="error-banner" role="alert">Workspace and model preferences could not be saved. They apply only to this window.</div>}
       {active?.ownership !== 'desktop' && connection?.readOnly && <div className="offline-banner" role="status">{connection?.canCreateOwned ? 'Shared CLI sessions are read-only. Start a new desktop-owned session to work with Prime.' : connection?.ownedReason || connection?.safetyReason}</div>}
       {error && <div className="error-banner" role="alert"><CircleHelp size={16} /><span>{error}</span><button className="icon-button" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button></div>}
       {connection && !connection.connected && <div className="offline-banner"><span>{connection.error || 'Connect to Prime Agent to start working.'}</span><button onClick={reconnect} disabled={connecting}>{connecting ? 'Connecting...' : 'Start agent service / reconnect'}<RefreshCw size={12} className={connecting ? 'spin' : ''} /></button></div>}
+      {activeId && findOpen && <FindBar containerRef={conversationRef} version={messages} hiddenCount={Math.max(0, messages.length - visibleMessages)} onShowAll={() => { setFollow(false); setVisibleMessages(messages.length); }} onClose={() => { setFindOpen(false); textarea.current?.focus(); }} focusRequest={findFocus} />}
       <div className={`content-scroll ${!activeId ? 'welcome-scroll' : ''}`} ref={scrollArea} onScroll={() => { const node = scrollArea.current; if (!node) return; if (node.scrollHeight - node.scrollTop - node.clientHeight < 100) setFollow(true); else if (node.scrollTop < lastScrollTop.current) setFollow(false); lastScrollTop.current = node.scrollTop; }}>
         {!activeId ? <Welcome onStarter={prompt => { setDraft(prompt); textarea.current?.focus(); }} /> : <Conversation conversationRef={conversationRef} knownIds={knownIds} active={active} running={running} loadingMessages={loadingMessages} messages={messages} conversationItems={conversationItems} visibleMessages={visibleMessages} setVisibleMessages={setVisibleMessages} setFollow={setFollow} />}
         {activeId && showJump && <div className="jump-latest-anchor"><button type="button" className="jump-latest" onClick={() => { setFollow(true); if (scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }}><ArrowDown size={13} />Jump to latest</button></div>}
       </div>
-      <Composer textarea={textarea} active={active} activeId={activeId} running={running} pending={pending} readOnly={readOnly} readyToSend={readyToSend} requiresConsent={requiresConsent} allowFileChanges={allowFileChanges} setAllowFileChanges={setAllowFileChanges} draft={draft} setDraft={setDraft} draftImages={draftImages} draftEntry={draftEntry} canAttach={canAttach} reading={reading} attachmentReason={attachmentReason} addImages={addImages} removeImage={removeImage} cwd={cwd} currentCwd={currentCwd} chooseFolder={chooseFolder} model={model} models={models} modelSearch={modelSearch} setModelSearch={setModelSearch} changeModel={changeModel} notice={notice} setError={setError} submit={submit} stop={stop} />
+      <Composer textarea={textarea} active={active} activeId={activeId} running={running} pending={pending} readOnly={readOnly} readyToSend={readyToSend} requiresConsent={requiresConsent} allowFileChanges={allowFileChanges} setAllowFileChanges={setAllowFileChanges} draft={draft} setDraft={setDraft} draftImages={draftImages} draftEntry={draftEntry} canAttach={canAttach} reading={reading} attachmentReason={attachmentReason} addImages={addImages} removeImage={removeImage} cwd={cwd} currentCwd={currentCwd} chooseFolder={chooseFolder} model={model} models={models} modelSearch={modelSearch} setModelSearch={setModelSearch} changeModel={changeModel} notice={notice} keepDrafts={keepDrafts} setError={setError} submit={submit} stop={stop} />
       <footer className="main-footer"><span>MADE FOR YOUR NEXT BIG THING.</span><span>Build with intention.<DockMark /></span></footer>
     </main>
     {active && workspaceOpen && <div className="workspace-slot" inert={!!dialog}><WorkspacePanel sessionId={active.id} cwd={active.cwd} running={running} canEdit={active.ownership === 'desktop'} onClose={() => setWorkspaceOpen(false)} /></div>}
-    {dialog && <Modal dialog={dialog} dialogPending={dialogPending} setDialog={setDialog}>{dialog === 'settings' ? <><AppearanceSettings appearance={appearance} onChange={changeAppearance} onClose={() => setDialog(null)} storageError={appearanceStorageError} /><DisplaySettings /><ProviderSettings onModelsChanged={setModels} /><ConnectionSettings onConnect={reconnect} /></> : dialog === 'palette' ? <CommandPalette commands={commands} onPick={command => { setDialog(null); command.run(); }} /> : dialog === 'tags' && active ? <TagsDialog active={active} meta={meta} updateMeta={updateMeta} tagInput={tagInput} setTagInput={setTagInput} onClose={() => setDialog(null)} /> : dialog === 'about' ? <AboutDialog connection={connection} onClose={() => setDialog(null)} /> : (dialog === 'resume-owned' || dialog === 'fork-owned') ? <HistoryDialog dialog={dialog} active={active} messages={messages} error={error} forkEntryId={forkEntryId} setForkEntryId={setForkEntryId} historyConsent={historyConsent} setHistoryConsent={setHistoryConsent} dialogPending={dialogPending} confirmHistory={confirmHistory} onClose={() => setDialog(null)} /> : dialog === 'close-owned' ? <CloseOwnedDialog dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} /> : <RenameDeleteDialog dialog={dialog} active={active} renameTitle={renameTitle} setRenameTitle={setRenameTitle} dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} />}</Modal>}
+    {dialog && <Modal dialog={dialog} dialogPending={dialogPending} setDialog={setDialog}>{dialog === 'settings' ? <><AppearanceSettings appearance={appearance} onChange={changeAppearance} onClose={() => setDialog(null)} storageError={appearanceStorageError} /><DisplaySettings keepDrafts={keepDrafts} onKeepDraftsChange={changeKeepDrafts} draftStorageError={draftStorageError} /><ProviderSettings onModelsChanged={setModels} /><ConnectionSettings onConnect={reconnect} /></> : dialog === 'palette' ? <CommandPalette commands={commands} onPick={command => { setDialog(null); command.run(); }} /> : dialog === 'tags' && active ? <TagsDialog active={active} meta={meta} updateMeta={updateMeta} tagInput={tagInput} setTagInput={setTagInput} onClose={() => setDialog(null)} /> : dialog === 'about' ? <AboutDialog connection={connection} onClose={() => setDialog(null)} /> : (dialog === 'resume-owned' || dialog === 'fork-owned') ? <HistoryDialog dialog={dialog} active={active} messages={messages} error={error} forkEntryId={forkEntryId} setForkEntryId={setForkEntryId} historyConsent={historyConsent} setHistoryConsent={setHistoryConsent} dialogPending={dialogPending} confirmHistory={confirmHistory} onClose={() => setDialog(null)} /> : dialog === 'close-owned' ? <CloseOwnedDialog dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} /> : <RenameDeleteDialog dialog={dialog} active={active} renameTitle={renameTitle} setRenameTitle={setRenameTitle} dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} />}</Modal>}
   </div>;
 }

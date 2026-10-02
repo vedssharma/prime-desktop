@@ -14,6 +14,8 @@ export interface Session {
   /** Follow-ups the agent reports as queued. Only present when the agent reports it (desktop-owned sessions). */
   queuedCount?: number;
   supportsImages?: boolean;
+  /** Closed desktop-owned sessions the user archived; hidden from the sidebar unless shown. */
+  archived?: boolean;
 }
 export interface Message {
   id: string;
@@ -30,6 +32,12 @@ export interface SessionUsage {
   /** Null values mean the agent has no estimate yet, for example right after compaction. */
   context?: { tokens: number | null; contextWindow: number | null; percent: number | null };
 }
+/** Pushed by the main process for desktop-owned sessions; see electron/prime.ts. */
+export type SessionEvent =
+  | { type: 'stream'; sessionId: string; streamId: string; messages: Message[] }
+  | { type: 'changed' | 'activity'; sessionId: string };
+/** A session whose saved conversation text matched a sidebar search. */
+export interface SearchMatch { id: string; snippet: string; }
 export interface ModelOption { id: string; name: string; }
 export interface ConnectionStatus {
   connected: boolean;
@@ -57,6 +65,8 @@ export interface PrimeAPI {
   connect(): Promise<ConnectionStatus>;
   listSessions(): Promise<Session[]>;
   getMessages(id: string): Promise<Message[]>;
+  /** Optional so the browser preview and test fakes can omit it; title search still works without it. */
+  searchSessions?(query: string): Promise<SearchMatch[]>;
   listModels(): Promise<ModelOption[]>;
   setSessionModel(id: string, model: string): Promise<void>;
   closeOwnedSession(id: string): Promise<void>;
@@ -68,7 +78,9 @@ export interface PrimeAPI {
   getSessionUsage(id: string): Promise<SessionUsage>;
   compactSession(id: string, instructions?: string): Promise<{ tokensBefore: number | null }>;
   renameSession(id: string, title: string): Promise<void>;
+  /** Closed desktop-owned sessions only: moves the saved transcript to the OS trash. */
   deleteSession(id: string): Promise<void>;
+  setSessionArchived(id: string, archived: boolean): Promise<void>;
   copyText(text: string): Promise<void>;
   chooseDirectory(): Promise<string | null>;
   openDirectory(path: string): Promise<void>;
@@ -79,6 +91,8 @@ export interface PrimeAPI {
   workspaceDiff(id: string, path: string): Promise<WorkspaceDiff>;
   notify(title: string, body: string, sessionId?: string): Promise<void>;
   onNotificationClick(listener: (sessionId: string) => void): () => void;
+  /** Optional so the browser preview and test fakes can omit it; polling still works without it. */
+  onSessionEvent?(listener: (event: SessionEvent) => void): () => void;
   saveText(suggestedName: string, content: string): Promise<boolean>;
 }
 declare global { interface Window { prime: PrimeAPI; } }

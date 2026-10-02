@@ -1,7 +1,7 @@
 {
   "name": "session-dock",
   "version": "0.1.0",
-  "description": "Session Dock \u2014 an unofficial desktop companion for Prime Agent CLI",
+  "description": "Session Dock — an unofficial desktop companion for Prime Agent CLI",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
@@ -12,6 +12,7 @@
     "start": "electron .",
     "test": "tsx --test tests/*.test.ts",
     "test:coverage": "tsx --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-exclude=\"node_modules/**\" tests/*.test.ts",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.tests.json",
     "package": "npm run check && npm run build && electron-builder --dir",
     "dist": "npm run check && npm run build && electron-builder",
@@ -22,7 +23,7 @@
     "package:check": "node scripts/check-package.mjs",
     "test:notices": "node --test tests/notices.test.mjs",
     "test:electron": "npm run build && node scripts/test-electron.mjs && node scripts/test-owned-electron.mjs",
-    "check": "npm run typecheck && npm test && npm run test:notices && npm run test:release && npm run test:ui",
+    "check": "npm run lint && npm run typecheck && npm test && npm run test:notices && npm run test:release && npm run test:ui",
     "electron:install": "node node_modules/electron/install.js",
     "release:unsigned": "node scripts/release.mjs",
     "release:signed": "node scripts/release.mjs --signed",
@@ -38,6 +39,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
@@ -45,8 +47,12 @@
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^44.4.4",
     "electron-builder": "^26.0.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.71.0",
     "vite": "^8.3.0"
   },
   "build": {

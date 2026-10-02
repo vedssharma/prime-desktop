@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   connect: () => invoke('connect'),
   listSessions: () => invoke('listSessions'),
   getMessages: (id: string) => invoke('getMessages', id),
+  searchSessions: (query: string) => invoke('searchSessions', query),
   listModels: () => invoke('listModels'),
   createSession: (input: { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[] }) => invoke('createSession', input),
   setSessionModel: (id: string, model: string) => invoke('setSessionModel', id, model),
@@ -21,6 +22,7 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   compactSession: (id: string, instructions?: string) => invoke('compactSession', id, instructions),
   renameSession: (id: string, title: string) => invoke('renameSession', id, title),
   deleteSession: (id: string) => invoke('deleteSession', id),
+  setSessionArchived: (id: string, archived: boolean) => invoke('setSessionArchived', id, archived),
   chooseDirectory: () => invoke('chooseDirectory'),
   openDirectory: (path: string) => invoke('openDirectory', path),
   workspaceList: (id: string, path?: string) => invoke('workspaceList', id, path),
@@ -33,6 +35,16 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
     const wrapped = (_event: unknown, sessionId: unknown) => { if (typeof sessionId === 'string') listener(sessionId); };
     ipcRenderer.on('prime:notification-click', wrapped);
     return () => { ipcRenderer.removeListener('prime:notification-click', wrapped); };
+  },
+  onSessionEvent: (listener: (event: unknown) => void) => {
+    const wrapped = (_event: unknown, payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const { type, sessionId } = payload as Record<string, unknown>;
+      if (typeof sessionId !== 'string' || !['stream', 'changed', 'activity'].includes(type as string)) return;
+      listener(payload);
+    };
+    ipcRenderer.on('prime:session-event', wrapped);
+    return () => { ipcRenderer.removeListener('prime:session-event', wrapped); };
   },
   saveText: (suggestedName: string, content: string) => invoke('saveText', suggestedName, content),
 }));

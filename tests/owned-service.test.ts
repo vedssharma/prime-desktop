@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, copyFile, chmod, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, copyFile, chmod, mkdir, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { PrimeService } from '../electron/prime.js';
+import { PrimeService, type SessionEvent } from '../electron/prime.js';
 import { fakeDaemon } from './fake-daemon.js';
 
 test('desktop-owned pipe writes only its fixture workspace, persists history, and never routes shared mutations', async () => {
@@ -23,7 +23,7 @@ test('desktop-owned pipe writes only its fixture workspace, persists history, an
   assert.equal((await service.listSessions()).find(s=>s.id===session.id)?.model,'fixture/org/nested');
   await service.renameSession(session.id,'Owned title');
   await assert.rejects(service.sendMessage('shared','no'),/Read-only compatibility/);
-  await assert.rejects(service.deleteSession(session.id),/Read-only compatibility/);
+  await assert.rejects(service.deleteSession(session.id),/Close the desktop session/); // open owned sessions cannot be deleted
   await service.closeOwnedSession(session.id);
   await assert.rejects(service.sendMessage(session.id,'no'),/closed/);
   assert.equal((await service.getMessages(session.id)).length,2); // fixture retains a coherent conversation branch
@@ -289,4 +289,103 @@ test('earlier-message fork uses a private snapshot and preserves the complete so
   await service.sendMessage(fork.id,'Independent continuation');
   assert.equal((await service.getMessages(original.id)).length,2);
  });
+});
+
+test('owned sessions push throttled stream, message and activity events with IDs that match later reads', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-events-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const events:SessionEvent[]=[];
+ const service=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent'),onEvent:event=>events.push(event)});
+ try {
+  const session=await service.createSession({cwd:dir,prompt:'Start',allowFileChanges:true});
+  await service.sendMessage(session.id,'STREAM_PARTIAL');
+  await new Promise(resolve=>setTimeout(resolve,120));
+  assert.deepEqual(events.map(event=>event.type),['activity','stream']);
+  const stream=events[1];
+  assert(stream.type==='stream');
+  assert.equal(stream.sessionId,session.id);
+  assert.deepEqual(stream.messages.map(m=>[m.role,m.content]),[['assistant','partial reply']]);
+  // The streamed reply must keep its ID when it appears in a full read, so the UI patches it in place.
+  const read=await service.getMessages(session.id);
+  assert.equal(read.at(-1)?.id,stream.streamId);
+  assert.equal(stream.messages[0].id,stream.streamId);
+  await service.sendMessage(session.id,'FINISH_STREAM');
+  await new Promise(resolve=>setTimeout(resolve,120));
+  assert.deepEqual(events.slice(2).map(event=>event.type),['changed','activity']);
+ }finally{await service.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('a listener that throws does not break the owned session', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-events-throw-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const service=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent'),onEvent:()=>{throw new Error('renderer gone');}});
+ try {
+  const session=await service.createSession({cwd:dir,prompt:'Start',allowFileChanges:true});
+  await service.sendMessage(session.id,'STREAM_PARTIAL');
+  await new Promise(resolve=>setTimeout(resolve,120));
+  await service.sendMessage(session.id,'FINISH_STREAM');
+  assert.equal((await service.listSessions())[0].writable,true);
+ }finally{await service.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('closed desktop sessions can be archived, unarchived and deleted to the trash; open and shared ones cannot', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-archive-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const trashed:string[]=[];
+ const options={executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent'),trash:async(file:string)=>{trashed.push(file);await rm(file);}};
+ const service=new PrimeService(options);
+ try {
+  const session=await service.createSession({cwd:dir,prompt:'Keep me',allowFileChanges:true});
+  await assert.rejects(service.setOwnedArchived(session.id,true),/Close the desktop session/);
+  await assert.rejects(service.deleteSession(session.id),/Close the desktop session/);
+  await assert.rejects(service.setOwnedArchived('shared-id',true),/Read-only compatibility/);
+  await assert.rejects(service.deleteSession('shared-id'),/Read-only compatibility/);
+  await service.closeOwnedSession(session.id);
+  await service.setOwnedArchived(session.id,true);
+  assert.equal((await service.listSessions()).find(s=>s.id===session.id)?.archived,true);
+  // Archive state survives a relaunch.
+  const reopened=new PrimeService(options);
+  try { assert.equal((await reopened.listSessions()).find(s=>s.id===session.id)?.archived,true); } finally { await reopened.close(); }
+  // Resuming brings an archived session back into the sidebar.
+  await service.resumeOwnedSession(session.id,true);
+  assert.equal((await service.listSessions()).find(s=>s.id===session.id)?.archived,undefined);
+  await service.closeOwnedSession(session.id);
+  await service.setOwnedArchived(session.id,true);
+  await service.setOwnedArchived(session.id,false);
+  assert.equal((await service.listSessions()).find(s=>s.id===session.id)?.archived,undefined);
+  const file=(await readFile(join(dir,'desktop',`${session.id}.json`),'utf8'));
+  const transcript=JSON.parse(file).sessionFile;
+  await service.deleteSession(session.id);
+  assert.deepEqual(trashed,[transcript]);
+  assert.equal((await service.listSessions()).some(s=>s.id===session.id),false);
+  await assert.rejects(readFile(join(dir,'desktop',`${session.id}.json`)),/ENOENT/);
+  // The workspace itself is untouched.
+  assert.equal((await readFile(cli,'utf8')).length>0,true);
+ }finally{await service.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('deletion is refused without a trash implementation and for records pointing outside desktop storage', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'owned-delete-guard-'));const cli=join(dir,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli);await chmod(cli,0o700);
+ const service=new PrimeService({executable:cli,desktopDir:join(dir,'desktop'),socketPath:join(dir,'absent')});
+ try {
+  const session=await service.createSession({cwd:dir,prompt:'Stay',allowFileChanges:true});
+  await service.closeOwnedSession(session.id);
+  await assert.rejects(service.deleteSession(session.id),/not available/);
+  assert.equal((await service.listSessions()).some(s=>s.id===session.id),true);
+ }finally{await service.close();await rm(dir,{recursive:true,force:true});}
+ const dir2=await mkdtemp(join(tmpdir(),'owned-delete-escape-'));const cli2=join(dir2,'prime-agent');
+ await copyFile(resolve('tests/fixtures/owned-cli.mjs'),cli2);await chmod(cli2,0o700);
+ const trashed:string[]=[];
+ const options={executable:cli2,desktopDir:join(dir2,'desktop'),socketPath:join(dir2,'absent'),trash:async(file:string)=>{trashed.push(file);}};
+ const first=new PrimeService(options);
+ let id='';
+ try { const session=await first.createSession({cwd:dir2,prompt:'Escape',allowFileChanges:true});id=session.id;await first.closeOwnedSession(id); } finally { await first.close(); }
+ // A symlinked transcript inside storage that resolves elsewhere must not be trashed.
+ const record=JSON.parse(await readFile(join(dir2,'desktop',`${id}.json`),'utf8'));
+ const outside=join(dir2,'outside.jsonl');await writeFile(outside,'x');
+ await rm(record.sessionFile);await symlink(outside,record.sessionFile);
+ const second=new PrimeService(options);
+ try { await assert.rejects(second.deleteSession(id),/regular file inside desktop storage/);assert.deepEqual(trashed,[]); }
+ finally{await second.close();await rm(dir2,{recursive:true,force:true});}
 });

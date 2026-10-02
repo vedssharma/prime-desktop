@@ -113,7 +113,7 @@ test('message mapping formats shell runs, images, plain strings and generated id
     { id: 'err', role: 'toolResult', errorMessage: 'Denied', content: 'partial', toolName: 'write' },
   ]);
   assert.deepEqual(messages, [
-    { id: 'user-2024-01-02T03:04:05Z-0', role: 'user', content: 'Plain string', timestamp: '2024-01-02T03:04:05.000Z' },
+    { id: 'user-2024-01-02T03:04:05Z', role: 'user', content: 'Plain string', timestamp: '2024-01-02T03:04:05.000Z' },
     { id: 'bashExecution-1-1', role: 'tool', content: '$ ls -a\n.\n..', timestamp: undefined },
     { id: 'img', role: 'user', content: 'Look\n[Image attachment unavailable: unsupported type or size]', timestamp: undefined },
     { id: 'call-call-0', role: 'tool', toolName: 'read', timestamp: undefined, content: '{}' },
@@ -211,7 +211,7 @@ test('CLI discovery prefers the configured executable, then PRIME_AGENT_BIN, the
     assert.deepEqual(await support({}), [true, '']);
     process.env.PRIME_AGENT_BIN = await cli(join(dir, 'env-cli'), '0.9.5');
     const [allowed, reason] = await support({});
-    assert.equal(allowed, false); assert.match(reason, /require verified Prime Agent 0\.9\.6/);
+    assert.equal(allowed, false); assert.match(reason, /^Prime Agent 0\.9\.5 is installed\. Desktop-owned sessions currently require verified Prime Agent 0\.9\.6/);
     assert.deepEqual(await support({ executable: await cli(join(dir, 'configured'), '0.9.6') }), [true, '']);
     for (const version of ['0.9.60', '10.9.6']) assert.equal((await support({ executable: await cli(join(dir, `v-${version}`), version) }))[0], false, version);
     assert.match((await support({ executable: join(dir, 'missing') }))[1], /Install Prime Agent 0\.9\.6/);
@@ -221,4 +221,38 @@ test('CLI discovery prefers the configured executable, then PRIME_AGENT_BIN, the
     if (previous === undefined) delete process.env.PRIME_AGENT_BIN; else process.env.PRIME_AGENT_BIN = previous;
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('switching between saved transcripts reuses each cached parse, and the oldest is evicted past the limit', async () => {
+  const ids = ['s0', 's1', 's2', 's3', 's4', 's5', 's6', 's7'];
+  const daemon = await fakeDaemon(() => ({ sessions: ids.map(id => ({ sessionId: id, sessionFile: join(daemon.directory, `${id}.jsonl`) })) }));
+  const service = new PrimeService({ socketPath: daemon.socketPath });
+  const message = (content: string) => JSON.stringify({ type: 'message', id: 'm', parentId: null, message: { role: 'user', content } });
+  try {
+    for (const id of ids) await writeFile(join(daemon.directory, `${id}.jsonl`), JSON.stringify({ type: 'session', id }) + '\n' + message(`Text of ${id}`) + '\n');
+    const s0 = await service.getMessages('s0');
+    const s1 = await service.getMessages('s1');
+    assert.equal(await service.getMessages('s0'), s0, 'returning to a recent session does not re-read it');
+    assert.equal(await service.getMessages('s1'), s1);
+    for (const id of ids.slice(2)) await service.getMessages(id);
+    assert.notEqual(await service.getMessages('s0'), s0, 'least recently used transcripts are evicted');
+  } finally { service.close(); await daemon.close(); }
+});
+
+test('conversation search matches saved text case-insensitively with excerpts and skips unreadable transcripts', async () => {
+  const daemon = await fakeDaemon(() => ({ sessions: ['alpha', 'beta', 'spoofed', 'missing'].map(id => ({ sessionId: id, sessionFile: join(daemon.directory, `${id}.jsonl`) })) }));
+  const service = new PrimeService({ socketPath: daemon.socketPath });
+  const message = (id: string, content: string, parentId: string | null) => JSON.stringify({ type: 'message', id, parentId, message: { role: 'assistant', content } });
+  try {
+    await writeFile(join(daemon.directory, 'alpha.jsonl'), [JSON.stringify({ type: 'session', id: 'alpha' }), message('a', 'Nothing here', null), message('b', `${'x'.repeat(80)} Fixed the Flaky RETRY loop ${'y'.repeat(80)}`, 'a')].join('\n') + '\n');
+    await writeFile(join(daemon.directory, 'beta.jsonl'), [JSON.stringify({ type: 'session', id: 'beta' }), message('a', 'Unrelated', null)].join('\n') + '\n');
+    // A file whose header names another session must never leak its text under this session.
+    await writeFile(join(daemon.directory, 'spoofed.jsonl'), [JSON.stringify({ type: 'session', id: 'someone-else' }), message('a', 'flaky retry secret', null)].join('\n') + '\n');
+    const found = await service.searchSessions('flaky retry');
+    assert.deepEqual(found.map(match => match.id), ['alpha']);
+    assert.match(found[0].snippet, /^…x+ Fixed the Flaky RETRY loop y+…$/);
+    assert.ok(found[0].snippet.length < 140);
+    assert.deepEqual(await service.searchSessions(' f '), [], 'single characters are not searched');
+    assert.deepEqual(await service.searchSessions('absent phrase'), []);
+  } finally { service.close(); await daemon.close(); }
 });

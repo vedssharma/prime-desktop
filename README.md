@@ -24,8 +24,11 @@ Authenticate and choose your default model in the CLI first (`prime-agent`, then
 ```sh
 npm run build       # Type-check and compile the UI and Electron code
 npm start           # Run the compiled desktop app
+npm run lint        # ESLint (TypeScript and React hooks rules)
+npm run check       # Lint, typecheck and every unit/UI test suite (what CI runs)
 npm test            # Backend unit tests
 npm run test:ui     # Browser UI tests with a fake backend
+npm run test:electron  # Native Electron tests with simulated daemons (no LLM requests)
 npm run smoke       # Read-only Electron smoke test against your local CLI
 npm run dev:web     # Browser-only UI preview; cannot control local sessions
 npm run package     # Build an unpacked app for your current platform
@@ -50,10 +53,10 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 
 - Create desktop-owned sessions in trusted workspaces using your existing CLI credentials.
 - Send prompts/follow-ups, attach images, view streamed output, stop work, and change the model when idle.
-- Browse and search existing Prime Agent sessions without changing them.
+- Browse and search existing Prime Agent sessions without changing them. Sidebar search matches titles, folders, tags and conversation text, with an excerpt of the match.
 - Read conversations, Markdown responses, and tool output.
 - Copy responses through a validated native clipboard bridge.
-- Keep separate unsent drafts for each session while the app is open.
+- Keep separate unsent drafts for each session while the app is open, and optionally across restarts.
 - Remember the last workspace and model selection across launches.
 - Configure appearance, readability, and connection paths without changing CLI state.
 - Export or copy a conversation as Markdown or JSON (session menu or command palette).
@@ -61,8 +64,10 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 - Native notifications when a session finishes while the app is in the background (Settings → Readability).
 - Pin sessions, add local tags, filter by tag, and group the sidebar by date or workspace. Pins and tags are stored only in this app.
 - Command palette (Cmd/Ctrl+K) for actions and jumping between sessions.
+- Find in the open conversation (Cmd/Ctrl+F), including collapsed tool output. Messages hidden behind **Load earlier** can be loaded into the search.
 - Read-only workspace panel: Git changes with diffs, and a file browser with previews. Paths are confined to the session's folder, symlinks are not followed, and Git is run with external diff and fsmonitor hooks disabled. This is a viewer, not a sandbox for agent tools.
-- Preserve saved desktop history when a session closes. Closed sessions remain read-only until explicitly resumed with renewed workspace trust; deletion is not offered.
+- Preserve saved desktop history when a session closes. Closed sessions remain read-only until explicitly resumed with renewed workspace trust.
+- Archive closed desktop sessions to hide them from the sidebar (**Show archived** brings them back), or delete them: the saved transcript moves to the system trash and workspace files are not touched. Shared CLI sessions cannot be archived or deleted from the app.
 
 ## Appearance
 
@@ -79,7 +84,7 @@ These are desktop-only settings and do not change the CLI's theme.
 
 ## Drafts and follow-ups
 
-Drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. Only the new-session workspace path, model choice, and appearance settings are stored locally.
+By default, drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. To keep unsent draft text across restarts, turn on **Keep unsent draft text** in Settings → Readability. Draft text is then saved unencrypted in the app's local storage on this device; attached images are never saved. Turning the setting off deletes the saved text.
 
 This workflow is enabled only for open desktop-owned sessions on the verified CLI version; shared and closed sessions are read-only. During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
 
@@ -125,9 +130,9 @@ The desktop app does not implement a second agent harness, write directly to ses
 
 ## Scope
 
-This is an initial desktop companion, not complete CLI feature parity. Login, provider setup, extension-specific interactive dialogs, branching, schedules, and advanced harness settings remain in the CLI. Session display refreshes periodically rather than providing a token-by-token renderer stream. This app runs agents with your normal user permissions; workspaces are not sandboxes.
+This is an initial desktop companion, not complete CLI feature parity. Login, provider setup, extension-specific interactive dialogs, branching, schedules, and advanced harness settings remain in the CLI. Desktop-owned sessions stream replies into the view as they are generated; shared CLI sessions refresh periodically. This app runs agents with your normal user permissions; workspaces are not sandboxes.
 
-Local development and unsigned packaging are supported. Signed/notarized public distribution needs platform signing credentials and release setup. The integration targets Prime Agent 0.9.5 with daemon protocol 7 / schema 28 or newer. Other protocol versions fail with an explicit compatibility error; future protocol changes may need an adapter update.
+Local development and unsigned packaging are supported. Signed/notarized public distribution needs platform signing credentials and release setup. Browsing shared CLI sessions needs a daemon speaking protocol 7 / schema 28 or newer (Prime Agent 0.9.5 and later); other protocol versions fail with an explicit compatibility error. Desktop-owned sessions additionally need a verified CLI release, currently 0.9.6, listed in `electron/cli-versions.ts`. If another version is installed, the app says which one it found and keeps shared sessions read-only.
 
 For nonstandard installations, set `PRIME_AGENT_BIN` to the CLI executable and `PRIME_DESKTOP_SOCKET` to the public daemon socket path. The default socket discovery currently targets macOS and Linux. Windows is unsupported and no Windows installer is offered. Saved transcripts larger than 64 MiB must be opened in the CLI.
 
@@ -170,7 +175,7 @@ saved default may change too. Shared sessions cannot be switched from this app.
 
 ## Owned-session limits
 
-- Requires verified CLI 0.9.6 and explicit workspace trust before the first prompt.
+- Requires a verified CLI version (currently 0.9.6) and explicit workspace trust before the first prompt. Supporting a new CLI release means running `npm run test:real-owned` against it (with `PRIME_PROBE_VERSION` set to that version) and adding it to `electron/cli-versions.ts` after review.
 - Tools have your normal user permissions; they are not confined to the chosen folder.
 - Extensions are disabled and slash commands/navigation/scheduling are not exposed.
 - App-owned transcripts live under the app's `owned-sessions/transcripts` directory;
