@@ -24,8 +24,11 @@ Authenticate and choose your default model in the CLI first (`prime-agent`, then
 ```sh
 npm run build       # Type-check and compile the UI and Electron code
 npm start           # Run the compiled desktop app
+npm run lint        # ESLint (TypeScript and React hooks rules)
+npm run check       # Lint, typecheck and every unit/UI test suite (what CI runs)
 npm test            # Backend unit tests
 npm run test:ui     # Browser UI tests with a fake backend
+npm run test:electron  # Native Electron tests with simulated daemons (no LLM requests)
 npm run smoke       # Read-only Electron smoke test against your local CLI
 npm run dev:web     # Browser-only UI preview; cannot control local sessions
 npm run package     # Build an unpacked app for your current platform
@@ -129,7 +132,7 @@ The desktop app does not implement a second agent harness, write directly to ses
 
 This is an initial desktop companion, not complete CLI feature parity. Login, provider setup, extension-specific interactive dialogs, branching, schedules, and advanced harness settings remain in the CLI. Desktop-owned sessions stream replies into the view as they are generated; shared CLI sessions refresh periodically. This app runs agents with your normal user permissions; workspaces are not sandboxes.
 
-Local development and unsigned packaging are supported. Signed/notarized public distribution needs platform signing credentials and release setup. The integration targets Prime Agent 0.9.5 with daemon protocol 7 / schema 28 or newer. Other protocol versions fail with an explicit compatibility error; future protocol changes may need an adapter update.
+Local development and unsigned packaging are supported. Signed/notarized public distribution needs platform signing credentials and release setup. Browsing shared CLI sessions needs a daemon speaking protocol 7 / schema 28 or newer (Prime Agent 0.9.5 and later); other protocol versions fail with an explicit compatibility error. Desktop-owned sessions additionally need a verified CLI release, currently 0.9.6, listed in `electron/cli-versions.ts`. If another version is installed, the app says which one it found and keeps shared sessions read-only.
 
 For nonstandard installations, set `PRIME_AGENT_BIN` to the CLI executable and `PRIME_DESKTOP_SOCKET` to the public daemon socket path. The default socket discovery currently targets macOS and Linux. Windows is unsupported and no Windows installer is offered. Saved transcripts larger than 64 MiB must be opened in the CLI.
 
@@ -172,7 +175,7 @@ saved default may change too. Shared sessions cannot be switched from this app.
 
 ## Owned-session limits
 
-- Requires verified CLI 0.9.6 and explicit workspace trust before the first prompt.
+- Requires a verified CLI version (currently 0.9.6) and explicit workspace trust before the first prompt. Supporting a new CLI release means running `npm run test:real-owned` against it (with `PRIME_PROBE_VERSION` set to that version) and adding it to `electron/cli-versions.ts` after review.
 - Tools have your normal user permissions; they are not confined to the chosen folder.
 - Extensions are disabled and slash commands/navigation/scheduling are not exposed.
 - App-owned transcripts live under the app's `owned-sessions/transcripts` directory;
