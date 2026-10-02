@@ -1,9 +1,11 @@
-import { mkdir, readdir, realpath, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readdir, realpath, writeFile, rename, unlink } from 'node:fs/promises';
 import { resolve, relative, isAbsolute, join } from 'node:path';
 import { isRecord, readBoundedFile } from './bounded-io.js';
 import { randomUUID } from 'node:crypto';
 export interface OwnedMetadata {
   id: string; sessionId: string; sessionFile: string; title: string; cwd: string; model: string; createdAt: string; updatedAt: string;
+  /** Hidden from the sidebar by default. Only closed sessions can be archived. */
+  archived?: boolean;
 }
 const validId = (id: string) => /^desktop-[0-9a-f-]{36}$/.test(id);
 export class OwnedStore {
@@ -12,7 +14,7 @@ export class OwnedStore {
   get transcripts() { return join(this.directory, 'transcripts'); }
   async initialize() { await mkdir(this.directory, { recursive: true, mode: 0o700 }); await mkdir(this.transcripts, { recursive: true, mode: 0o700 }); this.directory = await realpath(this.directory); }
   private validate(value: unknown): OwnedMetadata {
-    if (!isRecord(value) || !['id', 'sessionId', 'sessionFile', 'title', 'cwd', 'model', 'createdAt', 'updatedAt'].every(key => typeof value[key] === 'string') || !validId(value.id)) throw Error('Invalid desktop session metadata');
+    if (!isRecord(value) || !['id', 'sessionId', 'sessionFile', 'title', 'cwd', 'model', 'createdAt', 'updatedAt'].every(key => typeof value[key] === 'string') || !validId(value.id) || (value.archived !== undefined && typeof value.archived !== 'boolean')) throw Error('Invalid desktop session metadata');
     const child = relative(resolve(this.transcripts), resolve(value.sessionFile));
     if (child.startsWith('..') || isAbsolute(child) || !value.sessionId || !isAbsolute(value.cwd)) throw Error('Invalid desktop transcript location');
     return value as OwnedMetadata;
@@ -38,5 +40,12 @@ export class OwnedStore {
     });
     this.writes.set(value.id, task);
     try { await task; } finally { if (this.writes.get(value.id) === task) this.writes.delete(value.id); }
+  }
+  /** Remove a record after any pending write for it has settled. */
+  async remove(id: string) {
+    if (!validId(id)) throw Error('Invalid desktop session ID');
+    await (this.writes.get(id) ?? Promise.resolve()).catch(() => {});
+    await this.initialize();
+    await unlink(join(this.directory, id + '.json')).catch(error => { if (error?.code !== 'ENOENT') throw error; });
   }
 }

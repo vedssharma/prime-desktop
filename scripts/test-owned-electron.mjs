@@ -68,5 +68,11 @@ try {
  expect(streamed.map(event=>event.type)).toEqual(['activity','stream','changed','activity']);
  expect(streamed.every(event=>event.sessionId===fork.id)).toBe(true);
  expect(streamed[1].messages.map(message=>message.content)).toEqual(['partial reply']);
- console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history, consent-based fork/resume, independent follow-ups and streamed output events. No LLM request made.');
+ // Archive crosses the real bridge, validates its argument and only applies to closed desktop history.
+ await expect(page.evaluate(id=>window.prime.setSessionArchived(id,true),fork.id)).rejects.toThrow(/Close the desktop session/);
+ await expect(page.evaluate(id=>window.prime.setSessionArchived(id,'yes'),fork.id)).rejects.toThrow(/Invalid archive state/);
+ await page.evaluate(id=>window.prime.closeOwnedSession(id),fork.id);
+ await page.evaluate(id=>window.prime.setSessionArchived(id,true),fork.id);
+ expect((await page.evaluate(()=>window.prime.listSessions())).find(session=>session.id===fork.id).archived).toBe(true);
+ console.log('Owned Electron integration passed: consent, isolated fixture write, shared guard, image picker/IPC/transcript persistence, model capability rejection, close to saved history, consent-based fork/resume, independent follow-ups, streamed output events and archive. No LLM request made.');
 }catch(error){console.error(error);throw error;}finally{await app.evaluate(({dialog})=>{dialog.showMessageBox=async()=>({response:1,checkboxChecked:false});}).catch(()=>{});try{const page=await app.firstWindow();await page.evaluate(async()=>{for(const session of await window.prime.listSessions())if(session.ownership==='desktop')await window.prime.closeOwnedSession(session.id);});}catch{/* best-effort cleanup */}await app.close();await rm(dir,{recursive:true,force:true});}

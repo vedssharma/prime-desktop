@@ -20,6 +20,7 @@ export const previewAPI: PrimeAPI = {
   compactSession: desktopOnly,
   renameSession: desktopOnly,
   deleteSession: desktopOnly,
+  setSessionArchived: desktopOnly,
   chooseDirectory: desktopOnly,
   openDirectory: desktopOnly,
   workspaceList: desktopOnly,

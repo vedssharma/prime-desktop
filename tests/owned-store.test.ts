@@ -19,7 +19,7 @@ test('invalid metadata and transcripts outside the store are rejected before any
  const dir=await mkdtemp(join(tmpdir(),'owned-store-'));const store=new OwnedStore(dir);
  try{await store.initialize();
   for(const overrides of [{id:'desktop-short'},{id:'other-'+randomUUID()},{id:`desktop-${randomUUID()}/../x`},{title:undefined},{model:5},{sessionId:''},{cwd:'relative/path'},
-   {sessionFile:join(store.transcripts,'..','escape.jsonl')},{sessionFile:join(store.directory,'sibling.jsonl')},{sessionFile:'/elsewhere/p.jsonl'},{sessionFile:'../p.jsonl'}]){
+   {sessionFile:join(store.transcripts,'..','escape.jsonl')},{sessionFile:join(store.directory,'sibling.jsonl')},{sessionFile:'/elsewhere/p.jsonl'},{sessionFile:'../p.jsonl'},{archived:'yes'}]){
    await assert.rejects(store.save(record(store,overrides) as any),/Invalid desktop/,JSON.stringify(overrides));
   }
   assert.deepEqual((await readdir(store.directory)).sort(),['transcripts']);
@@ -47,5 +47,16 @@ test('store directories and metadata files are private to the user',{skip:proces
   assert.equal((await stat(store.directory)).mode&0o777,0o700);
   assert.equal((await stat(store.transcripts)).mode&0o777,0o700);
   assert.equal((await stat(join(store.directory,value.id+'.json'))).mode&0o777,0o600);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('archive state round-trips and removing a record waits for its pending write',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'owned-store-'));const store=new OwnedStore(dir);
+ try{await store.initialize();const value=record(store,{archived:true});
+  await store.save(value as any);assert.equal((await store.list())[0].archived,true);
+  const pending=store.save({...value,title:'late'} as any);await store.remove(value.id as string);await pending;
+  assert.deepEqual(await store.list(),[]);
+  await store.remove(value.id as string); // already gone is fine
+  await assert.rejects(store.remove('../x'),/Invalid desktop session ID/);
  }finally{await rm(dir,{recursive:true,force:true});}
 });

@@ -13,7 +13,7 @@ import { readBoundedFile, isRecord } from './bounded-io.js';
 import { promptCommand, validateImages, supportsImages, type ImageAttachment } from './attachments.js';
 
 const exec = promisify(execFile);
-interface Session { supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
+interface Session { archived?: boolean; supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
 interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; images?: ImageAttachment[]; }
 interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[]; }
 interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord; streamTimer?: ReturnType<typeof setTimeout>; }
@@ -25,7 +25,9 @@ interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: W
 export type SessionEvent =
   | { type: 'stream'; sessionId: string; streamId: string; messages: Message[] }
   | { type: 'changed' | 'activity'; sessionId: string };
-export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; onEvent?: (event: SessionEvent) => void; }
+export interface PrimeOptions { socketPath?: string; home?: string; executable?: string; timeoutMs?: number; readOnly?: boolean; desktopDir?: string; onEvent?: (event: SessionEvent) => void;
+  /** Moves a closed desktop transcript to the OS trash when it is deleted. Without it, deletion is refused. */
+  trash?: (file: string) => Promise<void>; }
 /** How often a streaming reply is pushed to the renderer at most. Token events can arrive far faster. */
 const STREAM_INTERVAL_MS = 50;
 
@@ -170,7 +172,7 @@ export class PrimeService {
       status: entry.error ? 'error' : entry.state?.isStreaming || entry.state?.isCompacting || entry.state?.unfinishedActionCount > 0 ? 'running' : 'idle',
       ...(Number.isSafeInteger(entry.state?.sessionActions?.queuedCount) && entry.state!.sessionActions.queuedCount >= 0 ? { queuedCount: entry.state!.sessionActions.queuedCount } : {}),
       ...(entry.state?.model ? { supportsImages: supportsImages(entry.state.model) } : {}),
-      ownership: 'desktop', writable: !!entry.rpc?.alive && !this.closing, lifecycle: entry.rpc?.alive ? 'open' : 'closed' };
+      ownership: 'desktop', writable: !!entry.rpc?.alive && !this.closing, lifecycle: entry.rpc?.alive ? 'open' : 'closed', ...(entry.metadata.archived ? { archived: true } : {}) };
   }
   private async liveOwned(id: string) {
     await this.initializeOwned();
@@ -387,7 +389,8 @@ export class PrimeService {
         if (this.closing) throw Error('Desktop closed before saved history opened.');
         const now = new Date().toISOString();
         const metadata: OwnedMetadata = mode === 'resume'
-          ? {...source.metadata, model:[state.model?.provider,state.model?.id].filter(Boolean).join('/'), updatedAt:now}
+          // A resumed session is live again, so it comes out of the archive.
+          ? {...source.metadata, archived:undefined, model:[state.model?.provider,state.model?.id].filter(Boolean).join('/'), updatedAt:now}
           : {id:`desktop-${randomUUID()}`,sessionId:rpc.id,sessionFile:rpc.sessionFile,title:`Fork of ${source.metadata.title}`.slice(0,200),cwd,model:[state.model?.provider,state.model?.id].filter(Boolean).join('/'),createdAt:now,updatedAt:now};
         await this.store!.save(metadata);
         const entry: OwnedEntry = {metadata,rpc,state};
@@ -453,7 +456,37 @@ export class PrimeService {
     if (this.openingHistory.has(id)) throw Error('Wait until this saved session finishes opening.');
     this.endStream(entry); await entry.rpc?.close(); entry.rpc = undefined; entry.state = {}; await this.store!.save(entry.metadata);
   }
-  async deleteSession(_id: string): Promise<void> { return this.assertWritable(); }
+  /** Closed desktop history only: it lives in app storage, so the shared-daemon identity race does not apply. */
+  private async closedOwned(id: string, action: string) {
+    await this.initializeOwned();
+    const entry = this.owned.get(id);
+    if (!entry) return this.assertWritable();
+    if (entry.rpc?.alive) throw Error(`Close the desktop session before you ${action} it.`);
+    if (this.openingHistory.has(id)) throw Error('Wait until this saved session finishes opening.');
+    return entry;
+  }
+  async setOwnedArchived(id: string, archived: boolean): Promise<void> {
+    const entry = await this.closedOwned(id, archived ? 'archive' : 'unarchive');
+    const metadata = { ...entry.metadata };
+    if (archived) metadata.archived = true; else delete metadata.archived;
+    await this.store!.save(metadata);
+    entry.metadata = metadata;
+  }
+  /** Moves the saved transcript to the OS trash, then forgets the record. Workspace files are never touched. */
+  async deleteSession(id: string): Promise<void> {
+    const entry = await this.closedOwned(id, 'delete');
+    if (!this.options.trash) throw Error('Deleting saved desktop history is not available here.');
+    const file = entry.metadata.sessionFile;
+    // Only ever trash a regular file inside desktop storage, never a path a record was edited to point at.
+    const stats = await lstat(file).catch(error => { if (error?.code === 'ENOENT') return undefined; throw error; });
+    if (stats) {
+      if (!stats.isFile() || dirname(await realpath(file)) !== await realpath(this.store!.transcripts)) throw Error('Saved history must be a regular file inside desktop storage.');
+      await this.options.trash(file);
+    }
+    await this.store!.remove(entry.metadata.id);
+    this.owned.delete(id);
+    this.transcriptCache = undefined;
+  }
   close(): Promise<void> {
     if (this.closingPromise) return this.closingPromise;
     this.closing = true; this.transport.close();

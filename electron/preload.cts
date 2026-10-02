@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('prime', Object.freeze({
   compactSession: (id: string, instructions?: string) => invoke('compactSession', id, instructions),
   renameSession: (id: string, title: string) => invoke('renameSession', id, title),
   deleteSession: (id: string) => invoke('deleteSession', id),
+  setSessionArchived: (id: string, archived: boolean) => invoke('setSessionArchived', id, archived),
   chooseDirectory: () => invoke('chooseDirectory'),
   openDirectory: (path: string) => invoke('openDirectory', path),
   workspaceList: (id: string, path?: string) => invoke('workspaceList', id, path),

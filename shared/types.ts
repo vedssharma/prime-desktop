@@ -14,6 +14,8 @@ export interface Session {
   /** Follow-ups the agent reports as queued. Only present when the agent reports it (desktop-owned sessions). */
   queuedCount?: number;
   supportsImages?: boolean;
+  /** Closed desktop-owned sessions the user archived; hidden from the sidebar unless shown. */
+  archived?: boolean;
 }
 export interface Message {
   id: string;
@@ -72,7 +74,9 @@ export interface PrimeAPI {
   getSessionUsage(id: string): Promise<SessionUsage>;
   compactSession(id: string, instructions?: string): Promise<{ tokensBefore: number | null }>;
   renameSession(id: string, title: string): Promise<void>;
+  /** Closed desktop-owned sessions only: moves the saved transcript to the OS trash. */
   deleteSession(id: string): Promise<void>;
+  setSessionArchived(id: string, archived: boolean): Promise<void>;
   copyText(text: string): Promise<void>;
   chooseDirectory(): Promise<string | null>;
   openDirectory(path: string): Promise<void>;

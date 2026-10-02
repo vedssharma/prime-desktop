@@ -15,7 +15,8 @@ let connectionConfig = { executable: '', socketPath: '' };
 function createService() {
   return new PrimeService({ desktopDir: path.join(app.getPath('userData'), 'owned-sessions'), executable: connectionConfig.executable || undefined, socketPath: connectionConfig.socketPath || undefined,
     // Owned-session output is pushed as it streams; only the trusted main window receives it.
-    onEvent: event => { if (window && !window.isDestroyed()) window.webContents.send('prime:session-event', event); } });
+    onEvent: event => { if (window && !window.isDestroyed()) window.webContents.send('prime:session-event', event); },
+    trash: file => shell.trashItem(file) });
 }
 
 let window: BrowserWindow | null = null;
@@ -72,6 +73,10 @@ function registerIPC() {
   handle('compactSession', (id, instructions) => service.compactSession(text(id, 'session ID', 4096), instructions === undefined || instructions === '' ? undefined : text(instructions, 'instructions', 16 * 1024)));
   handle('renameSession', (id, title) => service.renameSession(text(id, 'session ID', 4096), text(title, 'title', 200)));
   handle('deleteSession', (id) => service.deleteSession(text(id, 'session ID', 4096)));
+  handle('setSessionArchived', (id, archived) => {
+    if (typeof archived !== 'boolean') throw new Error('Invalid archive state');
+    return service.setOwnedArchived(text(id, 'session ID', 4096), archived);
+  });
   handle('chooseDirectory', async () => {
     if (!window) return null;
     const result = await dialog.showOpenDialog(window, { title: 'Choose a workspace', properties: ['openDirectory', 'createDirectory'] });

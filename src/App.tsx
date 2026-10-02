@@ -264,7 +264,11 @@ export default function App() {
   const [tagInput, setTagInput] = useState('');
   const [metaStorageError, setMetaStorageError] = useState(false);
   const updateMeta = (next: SessionMeta) => { setMeta(next); setMetaStorageError(!saveSessionMeta(next)); };
-  const grouped = useMemo(() => groupSessions(sessions, { search, tag: tagFilter, meta }), [sessions, search, tagFilter, meta]);
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedCount = useMemo(() => sessions.filter(session => session.archived).length, [sessions]);
+  const grouped = useMemo(() => groupSessions(showArchived ? sessions : sessions.filter(session => !session.archived), { search, tag: tagFilter, meta }), [sessions, showArchived, search, tagFilter, meta]);
+  // Closed desktop history lives in app storage, so it can be archived or deleted without touching shared CLI sessions.
+  const closedOwned = active?.ownership === 'desktop' && active.lifecycle === 'closed';
   const commands: Command[] = dialog === 'palette' ? [
     { id: 'new', label: 'New session', group: 'Actions', detail: newSessionShortcut, run: newSession },
     { id: 'settings', label: 'Open settings', group: 'Actions', keywords: 'appearance theme providers models connection preferences', run: () => setDialog('settings') },
@@ -275,6 +279,10 @@ export default function App() {
     ...(active ? [
       { id: 'pin', label: meta.pinned.includes(active.id) ? 'Unpin this session' : 'Pin this session', group: 'Actions' as const, run: () => updateMeta(togglePin(meta, active.id)) },
       { id: 'tags', label: 'Edit tags for this session', group: 'Actions' as const, run: () => { setTagInput((meta.tags[active.id] ?? []).join(', ')); setDialog('tags'); } },
+      ...(closedOwned ? [
+        { id: 'archive', label: active.archived ? 'Unarchive this session' : 'Archive this session', group: 'Actions' as const, keywords: 'hide remove clean up', run: () => void setArchived(!active.archived) },
+        { id: 'delete', label: 'Delete this session', group: 'Actions' as const, keywords: 'remove trash', run: () => setDialog('delete') },
+      ] : []),
       ...(readOnly ? [] : [{ id: 'rename', label: 'Rename this session', group: 'Actions' as const, run: () => { setRenameTitle(active.title); setDialog('rename'); } }]),
       ...(running && !readOnly ? [{ id: 'stop', label: 'Stop generation', group: 'Actions' as const, run: () => void stop() }] : []),
       ...(messages.length ? [
@@ -284,7 +292,7 @@ export default function App() {
       ] : []),
       { id: 'reveal', label: 'Reveal workspace folder', group: 'Actions' as const, detail: folderName(active.cwd), run: () => void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err))) },
     ] : []),
-    ...[...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(session => ({ id: `go-${session.id.replace(/[^\w-]/g, '_')}`, label: `Go to: ${session.title || 'Untitled session'}`, group: 'Sessions' as const, detail: folderName(session.cwd), keywords: (meta.tags[session.id] ?? []).join(' '), run: () => { setActiveId(session.id); setSidebarOpen(false); setMenuOpen(false); } })),
+    ...[...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(session => ({ id: `go-${session.id.replace(/[^\w-]/g, '_')}`, label: `Go to: ${session.title || 'Untitled session'}${session.archived ? ' (archived)' : ''}`, group: 'Sessions' as const, detail: folderName(session.cwd), keywords: (meta.tags[session.id] ?? []).join(' '), run: () => { setActiveId(session.id); setSidebarOpen(false); setMenuOpen(false); } })),
   ] : [];
   const knownTags = useMemo(() => allTags(meta, sessions), [meta, sessions]);
   useEffect(() => { if (tagFilter && !knownTags.some(tag => tag.toLowerCase() === tagFilter.toLowerCase())) setTagFilter(''); }, [knownTags, tagFilter]);
@@ -390,6 +398,16 @@ export default function App() {
     try { await window.prime.interruptSession(target); await refresh(); }
     catch (err) { setError(errorText(err)); } finally { setPendingFor(target, false); }
   }
+  async function setArchived(archived: boolean) {
+    if (!active || !closedOwned || pendingKeys.current.has(active.id)) return;
+    const id = active.id; setMenuOpen(false); setPendingFor(id, true); setError('');
+    try {
+      await window.prime.setSessionArchived(id, archived);
+      await refresh();
+      setNotices(previous => ({ ...previous, [id]: archived ? 'Session archived. It is hidden from the sidebar unless archived sessions are shown.' : 'Session restored to the sidebar.' }));
+    } catch (err) { if (activeIdRef.current === id) setError(`${archived ? 'Archive' : 'Unarchive'} session: ${errorText(err)}`); }
+    finally { setPendingFor(id, false); }
+  }
   const [forkEntryId, setForkEntryId] = useState('');
   function showHistoryAction(operation: 'resume-owned' | 'fork-owned') {
     setForkEntryId(''); setHistoryConsent(false); setError(''); setMenuOpen(false); setDialog(operation);
@@ -416,8 +434,8 @@ export default function App() {
   }
   async function confirmDialog(event: FormEvent) {
     event.preventDefault();
-    if (!activeId || dialogPendingRef.current || readOnly) return;
     const target = activeId, operation = dialog;
+    if (!target || dialogPendingRef.current || (readOnly && !(operation === 'delete' && closedOwned))) return;
     dialogPendingRef.current = true; setDialogPending(true);
     try {
       if (operation === 'close-owned') { await window.prime.closeOwnedSession(target); } else if (operation === 'delete') {
@@ -435,11 +453,11 @@ export default function App() {
   }
 
   return <div className={`app-shell ${isElectron ? 'electron' : 'browser-preview'}`}>
-    <Sidebar sidebarRef={sidebarRef} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} dialog={dialog} narrow={narrow} drawerOpen={drawerOpen} newSession={newSession} search={search} setSearch={setSearch} sessions={sessions} grouped={grouped} loading={loading} activeId={activeId} setActiveId={setActiveId} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} metaStorageError={metaStorageError} knownTags={knownTags} tagFilter={tagFilter} setTagFilter={setTagFilter} connection={connection} connecting={connecting} reconnect={reconnect} setDialog={setDialog} />
+    <Sidebar sidebarRef={sidebarRef} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} dialog={dialog} narrow={narrow} drawerOpen={drawerOpen} newSession={newSession} search={search} setSearch={setSearch} sessions={sessions} grouped={grouped} loading={loading} archivedCount={archivedCount} showArchived={showArchived} setShowArchived={setShowArchived} activeId={activeId} setActiveId={setActiveId} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} metaStorageError={metaStorageError} knownTags={knownTags} tagFilter={tagFilter} setTagFilter={setTagFilter} connection={connection} connecting={connecting} reconnect={reconnect} setDialog={setDialog} />
     <main inert={!!dialog || drawerOpen} className="main-panel">
-      <Topbar sidebarToggle={sidebarToggle} setSidebarOpen={setSidebarOpen} active={active} running={running} readOnly={readOnly} pending={pending} connection={connection} messages={messages} workspaceOpen={workspaceOpen} setWorkspaceOpen={setWorkspaceOpen} menuOpen={menuOpen} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} setTagInput={setTagInput} setRenameTitle={setRenameTitle} setDialog={setDialog} setError={setError} exportConversation={exportConversation} showHistoryAction={showHistoryAction} />
+      <Topbar sidebarToggle={sidebarToggle} setSidebarOpen={setSidebarOpen} active={active} running={running} readOnly={readOnly} pending={pending} connection={connection} messages={messages} workspaceOpen={workspaceOpen} setWorkspaceOpen={setWorkspaceOpen} menuOpen={menuOpen} setMenuOpen={setMenuOpen} meta={meta} updateMeta={updateMeta} setTagInput={setTagInput} setRenameTitle={setRenameTitle} setDialog={setDialog} setError={setError} exportConversation={exportConversation} showHistoryAction={showHistoryAction} setArchived={setArchived} />
       {active && <div className="session-context"><button onClick={() => void window.prime.openDirectory(active.cwd).catch(err => setError(errorText(err)))} title={active.cwd}><Folder size={13} /><span>{active.cwd}</span></button><span className="context-separator" /><span><Zap size={12} />{active.model || 'CLI default'}</span></div>}
-      {active?.ownership === 'desktop' && <div className="offline-banner">Desktop-owned · {active.lifecycle === 'open' ? 'Tools can change files. Quitting stops this session. Model changes may update CLI defaults.' : 'Closed — saved history is read-only.'}</div>}
+      {active?.ownership === 'desktop' && <div className="offline-banner">Desktop-owned · {active.lifecycle === 'open' ? 'Tools can change files. Quitting stops this session. Model changes may update CLI defaults.' : `Closed — saved history is read-only.${active.archived ? ' Archived: hidden from the sidebar.' : ''}`}</div>}
       {active && <details className="queue-status"><summary>Work &amp; queue status</summary><p>{running ? 'Agent reports active work.' : 'Agent reports no active work.'} {pending ? 'A desktop request is awaiting confirmation.' : 'No desktop request is pending for this session.'}</p>{typeof active.queuedCount === 'number' ? <p>Agent reports {active.queuedCount === 0 ? 'no queued follow-ups' : `${active.queuedCount} queued follow-up${active.queuedCount === 1 ? '' : 's'}`}. Queued message text, ordering and cancellation are not available through this connection.</p> : <p>Authoritative queue details are unavailable with this daemon protocol. This is not an empty-queue report. View, edit, or cancel queued work in the CLI.</p>}{active.ownership === 'desktop' && active.writable && <SessionUsage key={active.id} sessionId={active.id} idle={!running && !pending && !active.queuedCount} onCompacted={() => void refresh()} onError={message => { if (activeIdRef.current === active.id) setError(message); }} />}</details>}
       {preferencesError && <div className="error-banner" role="alert">Workspace and model preferences could not be saved. They apply only to this window.</div>}
       {active?.ownership !== 'desktop' && connection?.readOnly && <div className="offline-banner" role="status">{connection?.canCreateOwned ? 'Shared CLI sessions are read-only. Start a new desktop-owned session to work with Prime.' : connection?.ownedReason || connection?.safetyReason}</div>}
