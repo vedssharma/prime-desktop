@@ -83,7 +83,8 @@ export default function App() {
   useEffect(() => {
     if (!drawerOpen) return;
     sidebarRef.current?.querySelector<HTMLButtonElement>('.mobile-close')?.focus();
-    return () => { sidebarToggle.current?.focus(); };
+    const toggle = sidebarToggle.current;
+    return () => { toggle?.focus(); };
   }, [drawerOpen]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<DialogKind | null>(null);
@@ -215,6 +216,8 @@ export default function App() {
     // A run that starts while the idle timer is pending must not wait out the idle delay.
     pollMessagesNow.current = () => { if (!cancelled) { clearTimeout(timer); void poll(); } };
     void poll();
+    // messageRead is a request counter, not a DOM node: bumping its live value invalidates in-flight reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     return () => { cancelled = true; ++messageRead.current; clearTimeout(timer); pollMessagesNow.current = () => {}; };
   }, [activeId, readMessages]);
 

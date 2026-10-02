@@ -17,11 +17,15 @@ The desktop app requires an installed, configured Prime Agent CLI. Use
 ## Validation
 
 ```sh
+npm run lint
 npm run build
 npm test
 npx playwright install chromium
 npm run test:ui
 ```
+
+`npm run lint` runs ESLint (TypeScript and React hooks rules). `npm run check`
+runs lint, typecheck and every test suite.
 
 Unit and UI tests use simulated daemon responses. `npm run smoke` additionally
 launches Electron and reads your local CLI sessions; it never sends prompts or

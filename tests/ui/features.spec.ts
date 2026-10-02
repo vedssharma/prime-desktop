@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const now = new Date().toISOString();
-    let sessions = [
+    const sessions = [
       { id: 's1', title: 'Explore the workspace', cwd: '/tmp/project', model: 'test/model', status: 'idle', createdAt: now, updatedAt: now },
       { id: 's2', title: 'Second task', cwd: '/tmp/other', model: 'test/model', status: 'idle', createdAt: now, updatedAt: now },
     ];
@@ -23,7 +23,7 @@ test.beforeEach(async ({ page }) => {
       renameSession: async () => {}, deleteSession: async () => {}, setSessionModel: async () => {}, closeOwnedSession: async () => {},
       notify: async (title: string, body: string, id: string) => log('notify', title, body, id),
       onNotificationClick: (listener: (id: string) => void) => { (window as any).__click = listener; return () => {}; },
-      workspaceChanges: async (id: string) => ({ isRepo: true, truncated: false, changes: [{ path: 'src/a.ts', status: 'M', label: 'Modified' }, { path: 'new.txt', status: '??', label: 'Untracked' }] }),
+      workspaceChanges: async (_id: string) => ({ isRepo: true, truncated: false, changes: [{ path: 'src/a.ts', status: 'M', label: 'Modified' }, { path: 'new.txt', status: '??', label: 'Untracked' }] }),
       workspaceDiff: async (id: string, path: string) => { log('diff', id, path); return { path, truncated: false, diff: 'diff --git a/x b/x\n@@ -1 +1 @@\n-old line\n+new line\n' }; },
       workspaceList: async (id: string, path?: string) => path === 'src'
         ? { path, truncated: false, entries: [{ name: 'a.ts', type: 'file', size: 20 }] }

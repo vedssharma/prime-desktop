@@ -1,6 +1,6 @@
 import { historyThroughMessage } from './history-fork.js';
 import { execFile, spawn } from 'node:child_process';
-import { access, readFile, stat, lstat, realpath, writeFile, unlink } from 'node:fs/promises';
+import { access, stat, lstat, realpath, writeFile, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { OwnedRpcSession, type OwnedRpcStats as SessionUsage } from './owned-rpc.js';
 import { OwnedStore, type OwnedMetadata } from './owned-store.js';
@@ -260,7 +260,9 @@ export class PrimeService {
     // Unlike get_available_models this works even with no active sessions.
     const { stdout } = await exec(await this.cli(), ['model', 'list'], { timeout: 30_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' } });
     const models: { id: string; name: string }[] = [];
-    for (const line of stdout.replace(/\x1b\[[0-9;]*m/g, '').split('\n')) {
+    // Strip ANSI color codes before parsing columns.
+    // eslint-disable-next-line no-control-regex
+    for (const line of stdout.replace(/\u001b\[[0-9;]*m/g, '').split('\n')) {
       const match = line.trim().match(/^(\S+)\s+(\S+)\s+[\d.]+[KMB]?\s+/);
       if (match) models.push({ id: `${match[1]}/${match[2]}`, name: `${match[2]} · ${match[1]}` });
     }
