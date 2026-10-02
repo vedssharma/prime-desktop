@@ -135,6 +135,31 @@ test('reload preserves workspace and model preferences but never private drafts'
   await expectCall(page, ['create', { prompt: 'Use my saved preferences', cwd: '/tmp/chosen-workspace', model: 'test/chosen' }]);
 });
 
+test('opting in keeps draft text across reloads, and opting out deletes it', async ({ page }) => {
+  await openApp(page);
+  const keep = page.getByRole('checkbox', { name: /Keep unsent draft text/ });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await keep.check();
+  await page.keyboard.press('Escape');
+  await composer(page).fill('Kept new-session draft');
+  await selectSession(page, 'Alpha');
+  await composer(page).fill('Kept Alpha draft');
+  await expect(page.getByText('Draft text is saved on this device. Images are not.')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('session-dock.drafts.v1') ?? '')).toContain('Kept Alpha draft');
+  await page.reload();
+  await expect(page.getByText('Agent connected', { exact: true })).toBeVisible();
+  await expect(composer(page)).toHaveValue('Kept new-session draft');
+  await selectSession(page, 'Alpha');
+  await expect(composer(page)).toHaveValue('Kept Alpha draft');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await keep.uncheck();
+  expect(await page.evaluate(() => localStorage.getItem('session-dock.drafts.v1'))).toBeNull();
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(page.getByText('Agent connected', { exact: true })).toBeVisible();
+  await expect(composer(page)).toHaveValue('');
+});
+
 test('running sessions offer Queue follow-up alongside Stop generation and confirm acceptance', async ({ page }) => {
   await openApp(page, true);
   await newSession(page);

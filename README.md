@@ -53,7 +53,7 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 - Browse and search existing Prime Agent sessions without changing them. Sidebar search matches titles, folders, tags and conversation text, with an excerpt of the match.
 - Read conversations, Markdown responses, and tool output.
 - Copy responses through a validated native clipboard bridge.
-- Keep separate unsent drafts for each session while the app is open.
+- Keep separate unsent drafts for each session while the app is open, and optionally across restarts.
 - Remember the last workspace and model selection across launches.
 - Configure appearance, readability, and connection paths without changing CLI state.
 - Export or copy a conversation as Markdown or JSON (session menu or command palette).
@@ -81,7 +81,7 @@ These are desktop-only settings and do not change the CLI's theme.
 
 ## Drafts and follow-ups
 
-Drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. Only the new-session workspace path, model choice, and appearance settings are stored locally.
+By default, drafts live only in renderer memory. Switching sessions keeps them, but closing or reloading the window clears them. To keep unsent draft text across restarts, turn on **Keep unsent draft text** in Settings → Readability. Draft text is then saved unencrypted in the app's local storage on this device; attached images are never saved. Turning the setting off deletes the saved text.
 
 This workflow is enabled only for open desktop-owned sessions on the verified CLI version; shared and closed sessions are read-only. During a running session, Enter (or **Queue follow-up**) submits a message for after the current work finishes. The app confirms admission; that is not a guarantee that the work has completed. A failed submission keeps your draft. An accepted submission clears only the exact draft that was sent, even if you have switched sessions or typed something new.
 

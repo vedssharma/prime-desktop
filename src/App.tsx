@@ -22,6 +22,7 @@ import { errorText, folderName } from './format';
 import { findShortcut, isElectron, newSessionShortcut } from './platform';
 import { mergeStream } from './stream';
 import FindBar from './FindBar';
+import { loadKeepDrafts, loadSavedDrafts, saveDrafts, saveKeepDrafts } from './drafts';
 import DockMark from './DockMark';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
@@ -41,7 +42,17 @@ export default function App() {
   const [visibleMessages, setVisibleMessages] = useState(100);
   const [search, setSearch] = useState('');
   const [preferences] = useState(loadPreferences);
-  const [drafts, setDrafts] = useState<Record<string, { text: string; images: DraftImage[]; revision: number; attachmentError?: string }>>({});
+  const [keepDrafts, setKeepDrafts] = useState(loadKeepDrafts);
+  const [draftStorageError, setDraftStorageError] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, { text: string; images: DraftImage[]; revision: number; attachmentError?: string }>>(() => keepDrafts
+    ? Object.fromEntries(Object.entries(loadSavedDrafts()).map(([key, text]) => [key, { text, images: [], revision: 0 }])) : {});
+  useEffect(() => {
+    if (!keepDrafts) return;
+    // Debounced so typing does not write storage on every keystroke.
+    const timer = setTimeout(() => setDraftStorageError(!saveDrafts(drafts)), 400);
+    return () => clearTimeout(timer);
+  }, [drafts, keepDrafts]);
+  const changeKeepDrafts = (enabled: boolean) => { setKeepDrafts(enabled); setDraftStorageError(!saveKeepDrafts(enabled)); };
   const draftKey = activeId ?? 'new-session';
   const draftEntry = drafts[draftKey];
   const draft = draftEntry?.text ?? '';
@@ -487,10 +498,10 @@ export default function App() {
         {!activeId ? <Welcome onStarter={prompt => { setDraft(prompt); textarea.current?.focus(); }} /> : <Conversation conversationRef={conversationRef} knownIds={knownIds} active={active} running={running} loadingMessages={loadingMessages} messages={messages} conversationItems={conversationItems} visibleMessages={visibleMessages} setVisibleMessages={setVisibleMessages} setFollow={setFollow} />}
         {activeId && showJump && <div className="jump-latest-anchor"><button type="button" className="jump-latest" onClick={() => { setFollow(true); if (scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }}><ArrowDown size={13} />Jump to latest</button></div>}
       </div>
-      <Composer textarea={textarea} active={active} activeId={activeId} running={running} pending={pending} readOnly={readOnly} readyToSend={readyToSend} requiresConsent={requiresConsent} allowFileChanges={allowFileChanges} setAllowFileChanges={setAllowFileChanges} draft={draft} setDraft={setDraft} draftImages={draftImages} draftEntry={draftEntry} canAttach={canAttach} reading={reading} attachmentReason={attachmentReason} addImages={addImages} removeImage={removeImage} cwd={cwd} currentCwd={currentCwd} chooseFolder={chooseFolder} model={model} models={models} modelSearch={modelSearch} setModelSearch={setModelSearch} changeModel={changeModel} notice={notice} setError={setError} submit={submit} stop={stop} />
+      <Composer textarea={textarea} active={active} activeId={activeId} running={running} pending={pending} readOnly={readOnly} readyToSend={readyToSend} requiresConsent={requiresConsent} allowFileChanges={allowFileChanges} setAllowFileChanges={setAllowFileChanges} draft={draft} setDraft={setDraft} draftImages={draftImages} draftEntry={draftEntry} canAttach={canAttach} reading={reading} attachmentReason={attachmentReason} addImages={addImages} removeImage={removeImage} cwd={cwd} currentCwd={currentCwd} chooseFolder={chooseFolder} model={model} models={models} modelSearch={modelSearch} setModelSearch={setModelSearch} changeModel={changeModel} notice={notice} keepDrafts={keepDrafts} setError={setError} submit={submit} stop={stop} />
       <footer className="main-footer"><span>MADE FOR YOUR NEXT BIG THING.</span><span>Build with intention.<DockMark /></span></footer>
     </main>
     {active && workspaceOpen && <div className="workspace-slot" inert={!!dialog}><WorkspacePanel sessionId={active.id} cwd={active.cwd} running={running} canEdit={active.ownership === 'desktop'} onClose={() => setWorkspaceOpen(false)} /></div>}
-    {dialog && <Modal dialog={dialog} dialogPending={dialogPending} setDialog={setDialog}>{dialog === 'settings' ? <><AppearanceSettings appearance={appearance} onChange={changeAppearance} onClose={() => setDialog(null)} storageError={appearanceStorageError} /><DisplaySettings /><ProviderSettings onModelsChanged={setModels} /><ConnectionSettings onConnect={reconnect} /></> : dialog === 'palette' ? <CommandPalette commands={commands} onPick={command => { setDialog(null); command.run(); }} /> : dialog === 'tags' && active ? <TagsDialog active={active} meta={meta} updateMeta={updateMeta} tagInput={tagInput} setTagInput={setTagInput} onClose={() => setDialog(null)} /> : dialog === 'about' ? <AboutDialog connection={connection} onClose={() => setDialog(null)} /> : (dialog === 'resume-owned' || dialog === 'fork-owned') ? <HistoryDialog dialog={dialog} active={active} messages={messages} error={error} forkEntryId={forkEntryId} setForkEntryId={setForkEntryId} historyConsent={historyConsent} setHistoryConsent={setHistoryConsent} dialogPending={dialogPending} confirmHistory={confirmHistory} onClose={() => setDialog(null)} /> : dialog === 'close-owned' ? <CloseOwnedDialog dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} /> : <RenameDeleteDialog dialog={dialog} active={active} renameTitle={renameTitle} setRenameTitle={setRenameTitle} dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} />}</Modal>}
+    {dialog && <Modal dialog={dialog} dialogPending={dialogPending} setDialog={setDialog}>{dialog === 'settings' ? <><AppearanceSettings appearance={appearance} onChange={changeAppearance} onClose={() => setDialog(null)} storageError={appearanceStorageError} /><DisplaySettings keepDrafts={keepDrafts} onKeepDraftsChange={changeKeepDrafts} draftStorageError={draftStorageError} /><ProviderSettings onModelsChanged={setModels} /><ConnectionSettings onConnect={reconnect} /></> : dialog === 'palette' ? <CommandPalette commands={commands} onPick={command => { setDialog(null); command.run(); }} /> : dialog === 'tags' && active ? <TagsDialog active={active} meta={meta} updateMeta={updateMeta} tagInput={tagInput} setTagInput={setTagInput} onClose={() => setDialog(null)} /> : dialog === 'about' ? <AboutDialog connection={connection} onClose={() => setDialog(null)} /> : (dialog === 'resume-owned' || dialog === 'fork-owned') ? <HistoryDialog dialog={dialog} active={active} messages={messages} error={error} forkEntryId={forkEntryId} setForkEntryId={setForkEntryId} historyConsent={historyConsent} setHistoryConsent={setHistoryConsent} dialogPending={dialogPending} confirmHistory={confirmHistory} onClose={() => setDialog(null)} /> : dialog === 'close-owned' ? <CloseOwnedDialog dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} /> : <RenameDeleteDialog dialog={dialog} active={active} renameTitle={renameTitle} setRenameTitle={setRenameTitle} dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} />}</Modal>}
   </div>;
 }
