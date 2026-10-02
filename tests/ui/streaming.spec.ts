@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
       connect: async () => ({ connected: true, readOnly: true, canCreateOwned: true, version: 'test', home: '/tmp' }),
       listSessions: async () => { calls.push(['list']); return sessions.map(session => ({ ...session })); },
       listModels: async () => [{ id: 'test/chosen', name: 'Chosen model' }],
-      getMessages: async (id: string) => { calls.push(['read', id]); return messages[id] || []; },
+      getMessages: async (id: string) => { calls.push(['read', id]); return [...(messages[id] || [])]; },
       onSessionEvent: (next: (event: any) => void) => { listener = next; return () => { listener = undefined; }; },
       sendMessage: async () => {}, interruptSession: async () => {}, renameSession: async () => {}, deleteSession: async () => {},
       getSessionUsage: async () => ({ userMessages: 1, assistantMessages: 0, toolCalls: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0 }),

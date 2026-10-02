@@ -128,7 +128,8 @@ export default function App() {
   const followBottom = useRef(true);
   // Mirrors followBottom for rendering: offer a way back when the user has scrolled away from new output.
   const [showJump, setShowJump] = useState(false);
-  const setFollow = (value: boolean) => { followBottom.current = value; setShowJump(!value); };
+  // Stable callbacks below let the memoized sidebar and conversation skip re-rendering on each draft keystroke.
+  const setFollow = useCallback((value: boolean) => { followBottom.current = value; setShowJump(!value); }, []);
   // Content growing below the viewport is not the user scrolling away; only an upward scroll stops following.
   const lastScrollTop = useRef(0);
   const activeIdRef = useRef(activeId);
@@ -144,7 +145,7 @@ export default function App() {
   // Desktop-owned sessions push streamed output, so their transcript poll is only a safety net.
   const pushed = active?.ownership === 'desktop' && typeof window.prime.onSessionEvent === 'function';
   const pushedRef = useRef(pushed); pushedRef.current = pushed;
-  const conversationItems = groupConversation(messages.slice(-visibleMessages));
+  const conversationItems = useMemo(() => groupConversation(messages.slice(-visibleMessages)), [messages, visibleMessages]);
   const currentCwd = active?.cwd || cwd;
   const refresh = useCallback(async () => { const list = await window.prime.listSessions(); setSessions(list); }, []);
   const messageRead = useRef(0);
@@ -227,7 +228,7 @@ export default function App() {
     // messageRead is a request counter, not a DOM node: bumping its live value invalidates in-flight reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     return () => { cancelled = true; ++messageRead.current; clearTimeout(timer); pollMessagesNow.current = () => {}; };
-  }, [activeId, readMessages]);
+  }, [activeId, readMessages, setFollow]);
 
   useEffect(() => { if (followBottom.current && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }, [messages, running, loadingMessages]);
   useEffect(() => { if (running) pollMessagesNow.current(); }, [running]);
@@ -267,7 +268,7 @@ export default function App() {
   const [tagFilter, setTagFilter] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [metaStorageError, setMetaStorageError] = useState(false);
-  const updateMeta = (next: SessionMeta) => { setMeta(next); setMetaStorageError(!saveSessionMeta(next)); };
+  const updateMeta = useCallback((next: SessionMeta) => { setMeta(next); setMetaStorageError(!saveSessionMeta(next)); }, []);
   const [showArchived, setShowArchived] = useState(false);
   // Conversation-text matches for the sidebar search, keyed by session ID with an excerpt.
   const [contentMatches, setContentMatches] = useState<ReadonlyMap<string, string>>(() => new Map());
@@ -315,7 +316,7 @@ export default function App() {
   const knownTags = useMemo(() => allTags(meta, sessions), [meta, sessions]);
   useEffect(() => { if (tagFilter && !knownTags.some(tag => tag.toLowerCase() === tagFilter.toLowerCase())) setTagFilter(''); }, [knownTags, tagFilter]);
 
-  async function reconnect() {
+  const reconnect = useCallback(async () => {
     setConnecting(true); setError('');
     try { const status = await window.prime.connect(); setConnection(status); setCwd(previous => previous || status.home); if (status.connected) {
         const [list, choices] = await Promise.allSettled([window.prime.listSessions(), window.prime.listModels()]);
@@ -325,7 +326,7 @@ export default function App() {
         else setError(`Model discovery: ${errorText(choices.reason)}`);
       } else setError(status.error || 'Could not connect to Prime Agent. Check that the CLI is installed and authenticated.'); }
     catch (err) { setError(errorText(err)); } finally { setConnecting(false); }
-  }
+  }, []);
   async function chooseFolder() { try { const folder = await window.prime.chooseDirectory(); if (folder) setCwd(folder); } catch (err) { setError(errorText(err)); } }
   async function addImages(files: File[]) {
     if (!canAttach || readingKeys.current.has(draftKey)) return;

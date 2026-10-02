@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
       connect: async () => ({ connected: true, version: 'test', home: '/tmp' }),
       listSessions: async () => sessions,
       listModels: async () => [],
-      getMessages: async (id: string) => messages[id] || [],
+      getMessages: async (id: string) => [...(messages[id] || [])], // IPC returns a fresh copy
       createSession: async () => sessions[0], sendMessage: async () => {}, interruptSession: async () => {},
       renameSession: async () => {}, deleteSession: async () => {}, setSessionModel: async () => {}, closeOwnedSession: async () => {},
       notify: async (title: string, body: string, id: string) => log('notify', title, body, id),

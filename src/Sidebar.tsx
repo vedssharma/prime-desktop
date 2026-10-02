@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import { memo, type RefObject } from 'react';
 import { Archive, CircleHelp, LoaderCircle, MessageSquare, PanelLeftClose, Pin, Plus, RefreshCw, Search, Settings, Terminal, X } from 'lucide-react';
 import type { ConnectionStatus, Session } from '../shared/types';
 import type { SessionMeta } from './sessionMeta';
@@ -39,7 +39,7 @@ type Props = {
   setDialog: (dialog: DialogKind) => void;
 };
 
-export default function Sidebar({ sidebarRef, sidebarOpen, setSidebarOpen, dialog, narrow, drawerOpen, newSession, search, setSearch, contentMatches, sessions, grouped, loading, archivedCount, showArchived, setShowArchived, activeId, setActiveId, setMenuOpen, meta, updateMeta, metaStorageError, knownTags, tagFilter, setTagFilter, connection, connecting, reconnect, setDialog }: Props) {
+export default memo(function Sidebar({ sidebarRef, sidebarOpen, setSidebarOpen, dialog, narrow, drawerOpen, newSession, search, setSearch, contentMatches, sessions, grouped, loading, archivedCount, showArchived, setShowArchived, activeId, setActiveId, setMenuOpen, meta, updateMeta, metaStorageError, knownTags, tagFilter, setTagFilter, connection, connecting, reconnect, setDialog }: Props) {
   return <>
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />}
     <aside ref={sidebarRef} inert={!!dialog || (narrow && !sidebarOpen)} aria-hidden={narrow && !sidebarOpen ? true : undefined} onKeyDown={event => { if (drawerOpen && event.key === 'Tab') { const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input, [href]')).filter(node => node.getClientRects().length && getComputedStyle(node).display !== 'none'); const first = items[0], last = items.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); } } }} className={`sidebar ${sidebarOpen ? 'is-open' : ''}`}>
@@ -55,4 +55,4 @@ export default function Sidebar({ sidebarRef, sidebarOpen, setSidebarOpen, dialo
       <div className="sidebar-bottom"><div className="local-note"><Terminal size={15} /><div><strong>Unofficial companion for Prime Agent</strong><span>Independent community project</span></div></div><button className="connection-button" onClick={reconnect} disabled={connecting} title={connection?.error || 'Reconnect to Prime Agent'}><span className={`status-dot ${connection?.connected ? 'connected' : ''}`} /><span>{connecting ? 'Connecting...' : connection?.connected ? 'Agent connected' : connection ? 'Agent disconnected' : 'Checking connection...'}</span>{connecting ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}</button><div className="sidebar-footer"><span>COMMUNITY BUILT</span><button className="icon-button" aria-label="Settings" title="Settings" onClick={() => setDialog('settings')}><Settings size={16} /></button><button className="icon-button" aria-label="About Session Dock" onClick={() => setDialog('about')}><CircleHelp size={16} /></button></div></div>
     </aside>
   </>;
-}
+});

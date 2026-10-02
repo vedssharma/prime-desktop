@@ -30,7 +30,7 @@ async function openApp(page: Page, running = false) {
       getMessages: async (id: string) => {
         calls.push(['read', id]);
         if (controls.readError) throw new Error(controls.readError);
-        return messages[id] || [];
+        return [...(messages[id] || [])]; // IPC returns a fresh copy
       },
       sendMessage: (id: string, text: string) => {
         calls.push(['send', id, text]);

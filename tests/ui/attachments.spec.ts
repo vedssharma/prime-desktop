@@ -14,7 +14,7 @@ async function open(page: Page) {
     (window as any).prime = {
       status:async()=>({connected:true,readOnly:true,canCreateOwned:true,home:'/tmp'}),
       listSessions:async()=>sessions,listModels:async()=>[{id:'fixture/vision',name:'Vision'}],
-      getMessages:async(id:string)=>messages[id]??[],
+      getMessages:async(id:string)=>[...(messages[id]??[])], // IPC returns a fresh copy
       createSession:async(input:any)=>{controls.calls.push(['create',input]);const s={...sessions[0],id:'created',title:'Created'};sessions.push(s);messages.created=[{id:'new',role:'user',content:input.prompt,images:input.images}];return s;},
       sendMessage:(id:string,text:string,images:any[])=>{
         controls.calls.push(['send',id,text,images]);
