@@ -24,6 +24,8 @@ export interface Message {
   timestamp?: string;
   toolName?: string;
   images?: ImageAttachment[];
+  /** Unified diff an edit tool reported applying (Prime Agent's `details.diff`). */
+  diff?: string;
 }
 export interface SessionUsage {
   userMessages: number; assistantMessages: number; toolCalls: number;

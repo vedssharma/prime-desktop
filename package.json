@@ -27,7 +27,7 @@
     "electron:install": "node node_modules/electron/install.js",
     "release:unsigned": "node scripts/release.mjs",
     "release:signed": "node scripts/release.mjs --signed",
-    "test:release": "node --test tests/release-policy.test.mjs tests/signed-release.test.mjs",
+    "test:release": "node --test tests/release-policy.test.mjs tests/signed-release.test.mjs tests/package-csp.test.mjs",
     "test:owned": "npm run build && node scripts/test-owned-electron.mjs",
     "test:real-owned": "npm run build && node scripts/test-real-owned-rpc.mjs"
   },
@@ -39,6 +39,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.0",

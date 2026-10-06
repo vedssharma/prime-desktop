@@ -20,7 +20,7 @@ import { readImageFiles, type DraftImage } from './attachments';
 import { validateImages, promptCommand } from '../electron/attachments';
 import { errorText, folderName } from './format';
 import { findShortcut, isElectron, newSessionShortcut } from './platform';
-import { mergeStream } from './stream';
+import { mergeStream, pollDelay, transcriptSignature } from './stream';
 import FindBar from './FindBar';
 import { loadKeepDrafts, loadSavedDrafts, saveDrafts, saveKeepDrafts } from './drafts';
 import DockMark from './DockMark';
@@ -29,6 +29,7 @@ import Topbar from './Topbar';
 import Welcome from './Welcome';
 import Conversation from './Conversation';
 import Composer from './Composer';
+import { ShowChangeContext } from './MessageViews';
 import { Modal, TagsDialog, AboutDialog, HistoryDialog, CloseOwnedDialog, RenameDeleteDialog, type DialogKind } from './Dialogs';
 
 export default function App() {
@@ -164,14 +165,23 @@ export default function App() {
   const knownIds = useRef<Set<string> | null>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const pollMessagesNow = useRef<() => void>(() => {});
+  const lastReadSignature = useRef('');
+  /** Reads the transcript; resolves true when it differs from the previous read. */
   const readMessages = useCallback(async (id: string) => {
     const request = ++messageRead.current;
     try {
       const next = await window.prime.getMessages(id);
-      if (request === messageRead.current && activeIdRef.current === id) { knownIds.current ??= new Set(next.map(message => message.id)); setMessages(next); }
+      if (request === messageRead.current && activeIdRef.current === id) {
+        knownIds.current ??= new Set(next.map(message => message.id)); setMessages(next);
+        const signature = transcriptSignature(id, next);
+        const changed = signature !== lastReadSignature.current;
+        lastReadSignature.current = signature;
+        return changed;
+      }
     } catch (error) {
       if (request === messageRead.current && activeIdRef.current === id) throw error;
     }
+    return false;
   }, []);
 
   useEffect(() => {
@@ -228,13 +238,14 @@ export default function App() {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     setLoadingMessages(true);
+    let unchanged = 0;
     async function poll() {
-      try { await readMessages(activeId!); }
+      try { unchanged = await readMessages(activeId!) ? 0 : unchanged + 1; }
       catch (err) { if (!cancelled) setError(errorText(err)); }
-      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, runningRef.current ? pushedRef.current ? 3000 : 600 : 10000); } }
+      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, pollDelay(runningRef.current, pushedRef.current, unchanged)); } }
     }
     // A run that starts while the idle timer is pending must not wait out the idle delay.
-    pollMessagesNow.current = () => { if (!cancelled) { clearTimeout(timer); void poll(); } };
+    pollMessagesNow.current = () => { if (!cancelled) { unchanged = 0; clearTimeout(timer); void poll(); } };
     void poll();
     // messageRead is a request counter, not a DOM node: bumping its live value invalidates in-flight reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -274,7 +285,16 @@ export default function App() {
   }), [refresh]);
   useEffect(() => window.prime.onNotificationClick?.(id => { if (!dialogRef.current) { setActiveId(id); setSidebarOpen(false); setMenuOpen(false); } }), []);
 
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceOpen, setWorkspacePanelOpen] = useState(false);
+  // A pending "Show in Changes" request from an edit in the conversation. Closing the panel drops it.
+  const [workspaceFocus, setWorkspaceFocus] = useState<{ sessionId: string; path: string; request: number } | null>(null);
+  const setWorkspaceOpen = useCallback((open: boolean) => { setWorkspacePanelOpen(open); if (!open) setWorkspaceFocus(null); }, []);
+  const showChange = useCallback((path: string) => {
+    const sessionId = activeIdRef.current;
+    if (!sessionId) return;
+    setWorkspacePanelOpen(true);
+    setWorkspaceFocus(previous => ({ sessionId, path, request: (previous?.request ?? 0) + 1 }));
+  }, []);
   const [meta, setMeta] = useState(loadSessionMeta);
   const [tagFilter, setTagFilter] = useState('');
   const [tagInput, setTagInput] = useState('');
@@ -495,13 +515,13 @@ export default function App() {
       {connection && !connection.connected && <div className="offline-banner"><span>{connection.error || 'Connect to Prime Agent to start working.'}</span><button onClick={reconnect} disabled={connecting}>{connecting ? 'Connecting...' : 'Start agent service / reconnect'}<RefreshCw size={12} className={connecting ? 'spin' : ''} /></button></div>}
       {activeId && findOpen && <FindBar containerRef={conversationRef} version={messages} hiddenCount={Math.max(0, messages.length - visibleMessages)} onShowAll={() => { setFollow(false); setVisibleMessages(messages.length); }} onClose={() => { setFindOpen(false); textarea.current?.focus(); }} focusRequest={findFocus} />}
       <div className={`content-scroll ${!activeId ? 'welcome-scroll' : ''}`} ref={scrollArea} onScroll={() => { const node = scrollArea.current; if (!node) return; if (node.scrollHeight - node.scrollTop - node.clientHeight < 100) setFollow(true); else if (node.scrollTop < lastScrollTop.current) setFollow(false); lastScrollTop.current = node.scrollTop; }}>
-        {!activeId ? <Welcome onStarter={prompt => { setDraft(prompt); textarea.current?.focus(); }} /> : <Conversation conversationRef={conversationRef} knownIds={knownIds} active={active} running={running} loadingMessages={loadingMessages} messages={messages} conversationItems={conversationItems} visibleMessages={visibleMessages} setVisibleMessages={setVisibleMessages} setFollow={setFollow} />}
+        {!activeId ? <Welcome onStarter={prompt => { setDraft(prompt); textarea.current?.focus(); }} /> : <ShowChangeContext.Provider value={showChange}><Conversation conversationRef={conversationRef} knownIds={knownIds} active={active} running={running} loadingMessages={loadingMessages} messages={messages} conversationItems={conversationItems} visibleMessages={visibleMessages} setVisibleMessages={setVisibleMessages} setFollow={setFollow} /></ShowChangeContext.Provider>}
         {activeId && showJump && <div className="jump-latest-anchor"><button type="button" className="jump-latest" onClick={() => { setFollow(true); if (scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight; }}><ArrowDown size={13} />Jump to latest</button></div>}
       </div>
       <Composer textarea={textarea} active={active} activeId={activeId} running={running} pending={pending} readOnly={readOnly} readyToSend={readyToSend} requiresConsent={requiresConsent} allowFileChanges={allowFileChanges} setAllowFileChanges={setAllowFileChanges} draft={draft} setDraft={setDraft} draftImages={draftImages} draftEntry={draftEntry} canAttach={canAttach} reading={reading} attachmentReason={attachmentReason} addImages={addImages} removeImage={removeImage} cwd={cwd} currentCwd={currentCwd} chooseFolder={chooseFolder} model={model} models={models} modelSearch={modelSearch} setModelSearch={setModelSearch} changeModel={changeModel} notice={notice} keepDrafts={keepDrafts} setError={setError} submit={submit} stop={stop} />
       <footer className="main-footer"><span>MADE FOR YOUR NEXT BIG THING.</span><span>Build with intention.<DockMark /></span></footer>
     </main>
-    {active && workspaceOpen && <div className="workspace-slot" inert={!!dialog}><WorkspacePanel sessionId={active.id} cwd={active.cwd} running={running} canEdit={active.ownership === 'desktop'} onClose={() => setWorkspaceOpen(false)} /></div>}
+    {active && workspaceOpen && <div className="workspace-slot" inert={!!dialog}><WorkspacePanel sessionId={active.id} cwd={active.cwd} running={running} canEdit={active.ownership === 'desktop'} focus={workspaceFocus?.sessionId === active.id ? workspaceFocus : undefined} onClose={() => setWorkspaceOpen(false)} /></div>}
     {dialog && <Modal dialog={dialog} dialogPending={dialogPending} setDialog={setDialog}>{dialog === 'settings' ? <><AppearanceSettings appearance={appearance} onChange={changeAppearance} onClose={() => setDialog(null)} storageError={appearanceStorageError} /><DisplaySettings keepDrafts={keepDrafts} onKeepDraftsChange={changeKeepDrafts} draftStorageError={draftStorageError} /><ProviderSettings onModelsChanged={setModels} /><ConnectionSettings onConnect={reconnect} /></> : dialog === 'palette' ? <CommandPalette commands={commands} onPick={command => { setDialog(null); command.run(); }} /> : dialog === 'tags' && active ? <TagsDialog active={active} meta={meta} updateMeta={updateMeta} tagInput={tagInput} setTagInput={setTagInput} onClose={() => setDialog(null)} /> : dialog === 'about' ? <AboutDialog connection={connection} onClose={() => setDialog(null)} /> : (dialog === 'resume-owned' || dialog === 'fork-owned') ? <HistoryDialog dialog={dialog} active={active} messages={messages} error={error} forkEntryId={forkEntryId} setForkEntryId={setForkEntryId} historyConsent={historyConsent} setHistoryConsent={setHistoryConsent} dialogPending={dialogPending} confirmHistory={confirmHistory} onClose={() => setDialog(null)} /> : dialog === 'close-owned' ? <CloseOwnedDialog dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} /> : <RenameDeleteDialog dialog={dialog} active={active} renameTitle={renameTitle} setRenameTitle={setRenameTitle} dialogPending={dialogPending} confirmDialog={confirmDialog} onClose={() => setDialog(null)} />}</Modal>}
   </div>;
 }

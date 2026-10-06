@@ -37,7 +37,11 @@ function FileNode({ name, path, depth, sessionId, listings, expand, open, select
   </li>;
 }
 
-export default function WorkspacePanel({ sessionId, cwd, running, canEdit, onClose }: { sessionId: string; cwd: string; running: boolean; canEdit: boolean; onClose: () => void }) {
+export default function WorkspacePanel({ sessionId, cwd, running, canEdit, focus, onClose }: {
+  sessionId: string; cwd: string; running: boolean; canEdit: boolean;
+  /** Show this file's changes; a new `request` number asks again for the same path. */
+  focus?: { path: string; request: number }; onClose: () => void;
+}) {
   const [tab, setTab] = useState<Tab>('changes');
   const [changes, setChanges] = useState<WorkspaceChanges | null>(null);
   const [changesError, setChangesError] = useState('');
@@ -84,6 +88,17 @@ export default function WorkspacePanel({ sessionId, cwd, running, canEdit, onClo
   }
   useEffect(() => { if (tab === 'files' && listings[''] === undefined) void expand(''); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   const confirmDiscard = () => !dirty || window.confirm('Discard your unsaved edits?');
+  // "Show in Changes" from an edit in the conversation. Declared after the reset above so a
+  // panel opened by the request keeps the diff it asked for.
+  const focusActions = useRef({ showDiff, confirmDiscard, tab });
+  focusActions.current = { showDiff, confirmDiscard, tab };
+  useEffect(() => {
+    if (!focus) return;
+    const { showDiff: show, confirmDiscard: discard, tab: currentTab } = focusActions.current;
+    if (currentTab === 'files' && !discard()) return;
+    setDraft(null); setTab('changes');
+    void show(focus.path);
+  }, [focus]);
   async function openFile(path: string) {
     if (!confirmDiscard()) return;
     const id = sessionId; setFileError(''); setFile(null); setDraft(null); setSaveNotice(''); setConflict(false);

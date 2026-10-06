@@ -11,11 +11,13 @@ import { isAbsolute, join, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { DaemonTransport, type WireRecord } from './transport.js';
 import { readBoundedFile, isRecord } from './bounded-io.js';
-import { promptCommand, validateImages, supportsImages, type ImageAttachment } from './attachments.js';
+import { promptCommand, supportsImages, type ImageAttachment } from './attachments.js';
+import { SavedTranscripts } from './saved-transcripts.js';
+import { fallbackId, normalizeMessages, normalizeSession, parseSavedTranscript, snippetAround, text, type Message, type Session } from './transcript.js';
+
+export { normalizeMessages, normalizeSession, parseSavedTranscript, snippetAround };
 
 const exec = promisify(execFile);
-interface Session { archived?: boolean; supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
-interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; images?: ImageAttachment[]; }
 interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[]; }
 interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord; streamTimer?: ReturnType<typeof setTimeout>; }
 /**
@@ -36,100 +38,7 @@ const TRANSCRIPT_CACHE_ENTRIES = 6;
 /** Text kept for full-text search across every saved transcript. */
 const SEARCH_CACHE_BYTES = 32 * 1024 * 1024;
 export interface SearchMatch { id: string; snippet: string }
-type TranscriptCache = Map<string, { key: string; messages: Message[]; size: number }>;
 
-/** A short single-line excerpt centered on the first match. */
-export function snippetAround(content: string, index: number, length: number, radius = 48): string {
-  const start = Math.max(0, index - radius), end = Math.min(content.length, index + length + radius);
-  return `${start > 0 ? '…' : ''}${content.slice(start, end).replace(/\s+/g, ' ').trim()}${end < content.length ? '…' : ''}`;
-}
-
-function text(value: unknown): string { return typeof value === 'string' ? value : ''; }
-function date(value: unknown): string | undefined {
-  if (typeof value !== 'string' && typeof value !== 'number') return;
-  const result = new Date(value);
-  return Number.isNaN(result.valueOf()) ? undefined : result.toISOString();
-}
-export function normalizeSession(raw: WireRecord): Session {
-  return {
-    id: text(raw.sessionId) || text(raw.id),
-    title: text(raw.sessionName) || text(raw.name) || text(raw.firstMessage) || 'Untitled session',
-    cwd: text(raw.cwd), model: text(raw.model?.name) || text(raw.model?.id),
-    status: raw.workerState === 'failed' || raw.rosterStatus === 'error' ? 'error' : raw.isStreaming || raw.isCompacting || raw.isBashRunning || raw.hasRunningRlmChildren || raw.activity === 'working' ? 'running' : 'idle',
-    updatedAt: date(raw.lastActivityAt) || date(raw.modified) || date(raw.created) || new Date(0).toISOString(),
-    createdAt: date(raw.created) || new Date(0).toISOString(),
-  };
-}
-
-/**
- * Live RPC messages have no IDs. Derive them from role and timestamp, not list position, so a
- * streamed reply keeps the same ID (and React key) once it lands in a full transcript read.
- */
-function fallbackId(message: WireRecord, index: number, seen: Map<string, number>): string {
-  if (message.timestamp === undefined || message.timestamp === null) return `${message.role}-${index}-${index}`;
-  const key = `${message.role}-${message.timestamp}`;
-  const count = (seen.get(key) ?? 0) + 1;
-  seen.set(key, count);
-  return count === 1 ? key : `${key}-${count}`;
-}
-
-export function normalizeMessages(messages: WireRecord[]): Message[] {
-  const output: Message[] = [];
-  const seen = new Map<string, number>();
-  messages.forEach((message, index) => {
-    const id = text(message.id) || fallbackId(message, index, seen);
-    const timestamp = date(message.timestamp);
-    if (message.role === 'custom' && message.display === false) return;
-    const role: Message['role'] = message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : ['toolResult', 'bashExecution'].includes(message.role) ? 'tool' : 'system';
-    const blocks: WireRecord[] = Array.isArray(message.content) ? message.content.filter(isRecord) : [];
-    let content = typeof message.content === 'string' ? message.content : blocks.filter(block => block.type === 'text').map(block => text(block.text)).join('\n');
-    if (['branchSummary', 'compactionSummary'].includes(message.role)) content = `${message.role === 'branchSummary' ? 'Branch summary' : 'Context summary'}\n\n${text(message.summary)}`;
-    if (message.role === 'bashExecution') content = `$ ${text(message.command)}\n${text(message.output)}`;
-    if (message.errorMessage) content += `${content ? '\n\n' : ''}Error: ${message.errorMessage}`;
-    const images: ImageAttachment[] = [];
-    for (const block of blocks.filter(block => block.type === 'image')) {
-      try { validateImages([...images, block]); images.push(validateImages([block])[0]); }
-      catch { content += '\n[Image attachment unavailable: unsupported type or size]'; }
-    }
-    if (content.trim() || images.length) output.push({ id, role, content, timestamp, ...(images.length ? { images } : {}), ...(message.toolName ? { toolName: text(message.toolName) } : {}) });
-    blocks.filter(block => block.type === 'toolCall').forEach((block, i) => {
-      output.push({ id: `${id}-call-${i}`, role: 'tool', toolName: text(block.name), timestamp, content: JSON.stringify(block.arguments ?? {}, null, 2) });
-    });
-  });
-  return output;
-}
-
-/** Read the selected JSONL branch without opening/migrating/waking a saved worker. */
-export function parseSavedTranscript(contents: string): WireRecord[] {
-  const entries: WireRecord[] = [];
-  const lines = contents.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    let entry: unknown;
-    try { entry = JSON.parse(lines[i]); } catch { if (i !== lines.length - 1) throw new Error('Saved transcript contains invalid JSON.'); else continue; }
-    if (!isRecord(entry) || typeof entry.type !== 'string') throw new Error('Saved transcript contains an invalid record.');
-    entries.push(entry);
-  }
-  const nodes = entries.filter(entry => typeof entry.id === 'string' && entry.type !== 'session');
-  const byId = new Map(nodes.map(entry => [entry.id, entry]));
-  const branch: WireRecord[] = [];
-  let cursor = nodes.at(-1);
-  const seen = new Set<string>();
-  while (cursor && !seen.has(cursor.id)) {
-    seen.add(cursor.id);
-    branch.push(cursor);
-    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
-  }
-  // Old v1 transcripts are linear and do not contain tree parent links.
-  const tree = nodes.some(entry => 'parentId' in entry);
-  // Display the selected history branch, not just the provider's compacted context.
-  return (tree ? branch.reverse() : entries).flatMap(entry => {
-    if (entry.type === 'message' && entry.message) return [{ ...entry.message, id: entry.id }];
-    if (entry.type === 'custom_message') return [{ role: 'custom', content: entry.content, display: entry.display, timestamp: entry.timestamp, id: entry.id }];
-    if (entry.type === 'branch_summary' || entry.type === 'compaction') return [{ role: entry.type === 'branch_summary' ? 'branchSummary' : 'compactionSummary', summary: entry.summary, timestamp: entry.timestamp, id: entry.id }];
-    return [];
-  });
-}
 
 export class PrimeService {
   private transport: DaemonTransport;
@@ -145,8 +54,8 @@ export class PrimeService {
   private options: PrimeOptions;
   private home: string;
   private executable?: string;
-  private transcriptCache: TranscriptCache = new Map();
-  private searchCache: TranscriptCache = new Map();
+  private transcripts = new SavedTranscripts(entries => entries > TRANSCRIPT_CACHE_ENTRIES);
+  private searchTranscripts = new SavedTranscripts((_entries, bytes) => bytes > SEARCH_CACHE_BYTES);
   private modelsLoading?: Promise<{ id: string; name: string }[]>;
   constructor(options: PrimeOptions = {}) {
     this.options = options;
@@ -277,35 +186,7 @@ export class PrimeService {
     }
     // Runtime IDs are reusable, so use the catalog's persisted file and verify its header.
     const raw = entry ? { sessionFile: entry.metadata.sessionFile } : await this.lookup(id, true);
-    return this.readSaved(id, raw.sessionFile, entry?.metadata.sessionId ?? id, this.transcriptCache, entries => entries > TRANSCRIPT_CACHE_ENTRIES);
-  }
-  /**
-   * Parse a saved transcript after checking its header names the expected session. Results are
-   * cached by file identity, size and timestamps, so an unchanged file is never re-read.
-   */
-  private async readSaved(id: string, file: unknown, expectedId: string, cache: TranscriptCache, full: (entries: number, bytes: number) => boolean): Promise<Message[]> {
-    if (typeof file !== 'string' || !file) throw new Error('This session has no saved transcript. Open it in the CLI.');
-    const metadata = await stat(file);
-    const cacheKey = JSON.stringify([file, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs]);
-    const hit = cache.get(id);
-    if (hit?.key === cacheKey) { cache.delete(id); cache.set(id, hit); return hit.messages; }
-    if (metadata.size > 64 * 1024 * 1024) throw new Error('This saved transcript exceeds the 64 MiB desktop limit. Open it in the CLI.');
-    const contents = await readBoundedFile(file);
-    let header: WireRecord;
-    try { header = JSON.parse(contents.split('\n', 1)[0]); }
-    catch { throw new Error('Invalid saved session header.'); }
-    if (header?.type !== 'session' || header.id !== expectedId) throw new Error('Session identity mismatch. Refusing to display another conversation.');
-    if (contents.split('\n').slice(1).some(line => { try { return JSON.parse(line)?.type === 'session'; } catch { return false; } })) throw new Error('Multiple session headers. Refusing an ambiguous transcript.');
-    const messages = normalizeMessages(parseSavedTranscript(contents));
-    cache.delete(id);
-    cache.set(id, { key: cacheKey, messages, size: messages.reduce((total, message) => total + message.content.length * 2, 0) });
-    let bytes = [...cache.values()].reduce((total, item) => total + item.size, 0);
-    // Least recently used first; always keep the transcript just read.
-    for (const [oldest, item] of cache) {
-      if (cache.size <= 1 || !full(cache.size, bytes)) break;
-      cache.delete(oldest); bytes -= item.size;
-    }
-    return messages;
+    return this.transcripts.read(id, raw.sessionFile, entry?.metadata.sessionId ?? id);
   }
   /**
    * Sessions whose saved conversation text contains `query` (case-insensitive), with a short excerpt.
@@ -322,7 +203,7 @@ export class PrimeService {
       let messages: Message[];
       try {
         messages = entry?.rpc?.alive && entry.messages ? entry.messages
-          : await this.readSaved(session.id, entry ? entry.metadata.sessionFile : this.sessions.get(session.id)?.sessionFile, entry?.metadata.sessionId ?? session.id, this.searchCache, (_entries, bytes) => bytes > SEARCH_CACHE_BYTES);
+          : await this.searchTranscripts.read(session.id, entry ? entry.metadata.sessionFile : this.sessions.get(session.id)?.sessionFile, entry?.metadata.sessionId ?? session.id);
       } catch { continue; }
       for (const message of messages) {
         const index = message.content.toLowerCase().indexOf(needle);
@@ -541,7 +422,7 @@ export class PrimeService {
     }
     await this.store!.remove(entry.metadata.id);
     this.owned.delete(id);
-    this.transcriptCache.delete(id); this.searchCache.delete(id);
+    this.transcripts.forget(id); this.searchTranscripts.forget(id);
   }
   close(): Promise<void> {
     if (this.closingPromise) return this.closingPromise;

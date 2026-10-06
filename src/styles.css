@@ -261,11 +261,23 @@ h1>span:after{content:'';position:absolute;bottom:-3px;height:4px;left:0;right:0
 .trace>summary::-webkit-details-marker{display:none}
 .trace>summary>svg:first-child{color:var(--accent-text);flex-shrink:0}
 .trace-title{color:var(--text)}
-.trace-count{opacity:.8}
+.trace-count{color:var(--muted)}
 .trace>summary>svg:last-child{margin-left:auto;transition:transform .15s}
 .trace[open]>summary>svg:last-child{transform:rotate(90deg)}
 .trace-steps{border-top:1px solid var(--border);padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-height:480px;overflow:auto}
 .trace-steps .tool-message{margin:0;background:var(--surface)}
+.edit-message .diff-counts{margin-left:auto;font-variant-numeric:tabular-nums}
+.edit-message .diff-counts+svg{margin-left:8px!important}
+.diff-added{color:var(--syn-string)}
+.diff-removed{color:var(--danger,#b3261e)}
+.tool-diff-actions{display:flex;gap:6px;padding:6px 12px;border-top:1px solid var(--border)}
+.text-button{display:inline-flex;align-items:center;gap:5px;border:0;background:none;padding:3px 6px;border-radius:4px;font-size:10px;color:var(--muted);cursor:pointer}
+.text-button:hover{background:var(--surface-hover);color:var(--text)}
+.tool-message .tool-diff{border-top:1px solid var(--border);max-height:350px;white-space:pre;padding:8px 0;line-height:1.6;color:var(--text)}
+.tool-diff .diff-line{padding:0 12px 0 0}
+.diff-number{display:inline-block;min-width:4ch;padding:0 8px;text-align:right;color:var(--muted);user-select:none}
+.diff-marker{display:inline-block;width:2ch;user-select:none}
+.diff-line.gap{color:var(--muted)}
 .trace-steps .system-message{margin:0}
 .trace-note.markdown{font-size:var(--small-size);color:var(--muted)}
 .trace-note>:first-child{margin-top:0}.trace-note>:last-child{margin-bottom:0}
@@ -550,11 +562,14 @@ button:disabled { color: var(--muted); background: var(--surface-subtle); border
 /* Syntax highlighting and tool-call previews */
 :root{--syn-keyword:#6d28d9;--syn-string:#0b6b5f;--syn-number:#9a4a06}
 :root[data-theme="dark"]{--syn-keyword:#c9adff;--syn-string:#86dccb;--syn-number:#f2b878}
+/* Code blocks use a dark surface in every theme, so they always take the dark syntax colors. */
+.markdown pre{--syn-keyword:#c9adff;--syn-string:#86dccb;--syn-number:#f2b878}
+.markdown pre .tok-comment{color:color-mix(in srgb,var(--code-text) 70%,var(--code))}
 .tok-keyword{color:var(--syn-keyword)}
 .tok-string{color:var(--syn-string)}
 .tok-number{color:var(--syn-number)}
 .tok-comment{color:var(--muted);font-style:italic}
-.tool-preview{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.75;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.tool-preview{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .display-settings label.checkbox-setting{justify-content:flex-start;gap:10px;line-height:1.5}
 
 .sidebar-controls{margin:0 0 12px;display:flex;flex-direction:column;gap:8px;font-size:10px;color:var(--sidebar-muted)}

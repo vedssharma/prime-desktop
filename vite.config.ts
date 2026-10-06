@@ -4,8 +4,11 @@ export default defineConfig({
   plugins: [react(), {
     name: 'dev-csp',
     transformIndexHtml(html, context) {
-      // React Fast Refresh injects a development-only inline preamble.
-      return context.server ? html.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'") : html;
+      // React Fast Refresh injects a development-only inline preamble, and hot reload needs
+      // the dev server's WebSocket. Neither belongs in the packaged app's policy.
+      return context.server
+        ? html.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'").replace("connect-src 'self'", "connect-src 'self' ws://127.0.0.1:5173")
+        : html;
     },
   }],
   base: './',

@@ -27,6 +27,7 @@ npm start           # Run the compiled desktop app
 npm run lint        # ESLint (TypeScript and React hooks rules)
 npm run check       # Lint, typecheck and every unit/UI test suite (what CI runs)
 npm test            # Backend unit tests
+npm run test:coverage  # Unit tests with a coverage report (CI publishes it on Linux)
 npm run test:ui     # Browser UI tests with a fake backend
 npm run test:electron  # Native Electron tests with simulated daemons (no LLM requests)
 npm run smoke       # Read-only Electron smoke test against your local CLI
@@ -61,6 +62,7 @@ On macOS, closing the window keeps the app and desktop-owned work running. **Qui
 - Configure appearance, readability, and connection paths without changing CLI state.
 - Export or copy a conversation as Markdown or JSON (session menu or command palette).
 - Syntax-highlighted code blocks and one-line previews of tool output.
+- File edits by the agent's `edit` tool show as diffs: the proposed replacements on the call and the applied diff (with line numbers) on the result. **Show raw** gives the original output, and **Show in Changes** opens that file's Git diff in the workspace panel.
 - Native notifications when a session finishes while the app is in the background (Settings → Readability).
 - Pin sessions, add local tags, filter by tag, and group the sidebar by date or workspace. Pins and tags are stored only in this app.
 - Command palette (Cmd/Ctrl+K) for actions and jumping between sessions.
