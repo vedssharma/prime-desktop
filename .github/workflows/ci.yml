@@ -16,6 +16,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Electron is a devDependency but ships in the app, so audit everything.
+      - run: npm audit --audit-level=high
       - run: npx playwright install --with-deps chromium
       - run: npm run check
       - run: npm run build
