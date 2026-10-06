@@ -47,6 +47,19 @@ test('message mapping preserves text, tools and errors without exposing hidden c
   assert.match(messages[3].content, /Provider unavailable/);
 });
 
+test('successful edit results carry the diff the agent applied; failed or oversized ones do not', () => {
+  const [ok, failed, big, other] = normalizeMessages([
+    { role: 'toolResult', toolName: 'edit', timestamp: 1, content: [{ type: 'text', text: 'Edited a.ts' }], details: { diff: '-1 a\n+1 b', firstChangedLine: 1 } },
+    { role: 'toolResult', toolName: 'edit', timestamp: 2, isError: true, content: [{ type: 'text', text: 'No match' }], details: { diff: '-1 a' } },
+    { role: 'toolResult', toolName: 'edit', timestamp: 3, content: [{ type: 'text', text: 'Edited b.ts' }], details: { diff: '+'.repeat(256 * 1024 + 1) } },
+    { role: 'toolResult', toolName: 'bash', timestamp: 4, content: [{ type: 'text', text: 'ok' }], details: 'not a record' },
+  ]);
+  assert.equal(ok.diff, '-1 a\n+1 b');
+  assert.equal(failed.diff, undefined);
+  assert.equal(big.diff, undefined);
+  assert.equal(other.diff, undefined);
+});
+
 test('saved transcript follows final branch and tolerates only an incomplete trailing line', () => {
   const records = [
     { type: 'session', id: 'header' },

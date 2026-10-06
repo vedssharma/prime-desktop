@@ -266,6 +266,18 @@ h1>span:after{content:'';position:absolute;bottom:-3px;height:4px;left:0;right:0
 .trace[open]>summary>svg:last-child{transform:rotate(90deg)}
 .trace-steps{border-top:1px solid var(--border);padding:10px 12px;display:flex;flex-direction:column;gap:8px;max-height:480px;overflow:auto}
 .trace-steps .tool-message{margin:0;background:var(--surface)}
+.edit-message .diff-counts{margin-left:auto;font-variant-numeric:tabular-nums}
+.edit-message .diff-counts+svg{margin-left:8px!important}
+.diff-added{color:var(--syn-string)}
+.diff-removed{color:var(--danger,#b3261e)}
+.tool-diff-actions{display:flex;gap:6px;padding:6px 12px;border-top:1px solid var(--border)}
+.text-button{display:inline-flex;align-items:center;gap:5px;border:0;background:none;padding:3px 6px;border-radius:4px;font-size:10px;color:var(--muted);cursor:pointer}
+.text-button:hover{background:var(--surface-hover);color:var(--text)}
+.tool-message .tool-diff{border-top:1px solid var(--border);max-height:350px;white-space:pre;padding:8px 0;line-height:1.6;color:var(--text)}
+.tool-diff .diff-line{padding:0 12px 0 0}
+.diff-number{display:inline-block;min-width:4ch;padding:0 8px;text-align:right;color:var(--muted);user-select:none}
+.diff-marker{display:inline-block;width:2ch;user-select:none}
+.diff-line.gap{color:var(--muted)}
 .trace-steps .system-message{margin:0}
 .trace-note.markdown{font-size:var(--small-size);color:var(--muted)}
 .trace-note>:first-child{margin-top:0}.trace-note>:last-child{margin-bottom:0}

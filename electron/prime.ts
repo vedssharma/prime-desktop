@@ -15,7 +15,7 @@ import { promptCommand, validateImages, supportsImages, type ImageAttachment } f
 
 const exec = promisify(execFile);
 interface Session { archived?: boolean; supportsImages?: boolean; queuedCount?: number; id: string; title: string; cwd: string; model: string; status: 'idle' | 'running' | 'error'; updatedAt: string; createdAt: string; ownership?: 'shared' | 'desktop'; writable?: boolean; lifecycle?: 'open' | 'closed'; }
-interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; images?: ImageAttachment[]; }
+interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; timestamp?: string; toolName?: string; images?: ImageAttachment[]; diff?: string; }
 interface CreateInput { prompt: string; cwd: string; model?: string; allowFileChanges?: boolean; images?: ImageAttachment[]; }
 interface OwnedEntry { metadata: OwnedMetadata; rpc?: OwnedRpcSession; state?: WireRecord; error?: string; messages?: Message[]; streaming?: WireRecord; streamTimer?: ReturnType<typeof setTimeout>; }
 /**
@@ -73,6 +73,16 @@ function fallbackId(message: WireRecord, index: number, seen: Map<string, number
   return count === 1 ? key : `${key}-${count}`;
 }
 
+/** Largest edit diff passed to the renderer; bigger ones show as plain tool output. */
+const MAX_TOOL_DIFF_CHARS = 256 * 1024;
+
+/** The diff a successful edit tool result reports in `details.diff`. */
+function appliedDiff(message: WireRecord): string | undefined {
+  if (message.role !== 'toolResult' || message.isError === true || !isRecord(message.details)) return undefined;
+  const diff = message.details.diff;
+  return typeof diff === 'string' && diff && diff.length <= MAX_TOOL_DIFF_CHARS ? diff : undefined;
+}
+
 export function normalizeMessages(messages: WireRecord[]): Message[] {
   const output: Message[] = [];
   const seen = new Map<string, number>();
@@ -91,7 +101,8 @@ export function normalizeMessages(messages: WireRecord[]): Message[] {
       try { validateImages([...images, block]); images.push(validateImages([block])[0]); }
       catch { content += '\n[Image attachment unavailable: unsupported type or size]'; }
     }
-    if (content.trim() || images.length) output.push({ id, role, content, timestamp, ...(images.length ? { images } : {}), ...(message.toolName ? { toolName: text(message.toolName) } : {}) });
+    const diff = appliedDiff(message);
+    if (content.trim() || images.length) output.push({ id, role, content, timestamp, ...(images.length ? { images } : {}), ...(message.toolName ? { toolName: text(message.toolName) } : {}), ...(diff ? { diff } : {}) });
     blocks.filter(block => block.type === 'toolCall').forEach((block, i) => {
       output.push({ id: `${id}-call-${i}`, role: 'tool', toolName: text(block.name), timestamp, content: JSON.stringify(block.arguments ?? {}, null, 2) });
     });
