@@ -20,7 +20,7 @@ import { readImageFiles, type DraftImage } from './attachments';
 import { validateImages, promptCommand } from '../electron/attachments';
 import { errorText, folderName } from './format';
 import { findShortcut, isElectron, newSessionShortcut } from './platform';
-import { mergeStream } from './stream';
+import { mergeStream, pollDelay, transcriptSignature } from './stream';
 import FindBar from './FindBar';
 import { loadKeepDrafts, loadSavedDrafts, saveDrafts, saveKeepDrafts } from './drafts';
 import DockMark from './DockMark';
@@ -165,14 +165,23 @@ export default function App() {
   const knownIds = useRef<Set<string> | null>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const pollMessagesNow = useRef<() => void>(() => {});
+  const lastReadSignature = useRef('');
+  /** Reads the transcript; resolves true when it differs from the previous read. */
   const readMessages = useCallback(async (id: string) => {
     const request = ++messageRead.current;
     try {
       const next = await window.prime.getMessages(id);
-      if (request === messageRead.current && activeIdRef.current === id) { knownIds.current ??= new Set(next.map(message => message.id)); setMessages(next); }
+      if (request === messageRead.current && activeIdRef.current === id) {
+        knownIds.current ??= new Set(next.map(message => message.id)); setMessages(next);
+        const signature = transcriptSignature(id, next);
+        const changed = signature !== lastReadSignature.current;
+        lastReadSignature.current = signature;
+        return changed;
+      }
     } catch (error) {
       if (request === messageRead.current && activeIdRef.current === id) throw error;
     }
+    return false;
   }, []);
 
   useEffect(() => {
@@ -229,13 +238,14 @@ export default function App() {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     setLoadingMessages(true);
+    let unchanged = 0;
     async function poll() {
-      try { await readMessages(activeId!); }
+      try { unchanged = await readMessages(activeId!) ? 0 : unchanged + 1; }
       catch (err) { if (!cancelled) setError(errorText(err)); }
-      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, runningRef.current ? pushedRef.current ? 3000 : 600 : 10000); } }
+      finally { if (!cancelled) { setLoadingMessages(false); clearTimeout(timer); timer = setTimeout(poll, pollDelay(runningRef.current, pushedRef.current, unchanged)); } }
     }
     // A run that starts while the idle timer is pending must not wait out the idle delay.
-    pollMessagesNow.current = () => { if (!cancelled) { clearTimeout(timer); void poll(); } };
+    pollMessagesNow.current = () => { if (!cancelled) { unchanged = 0; clearTimeout(timer); void poll(); } };
     void poll();
     // messageRead is a request counter, not a DOM node: bumping its live value invalidates in-flight reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
