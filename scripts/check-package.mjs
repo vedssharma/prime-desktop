@@ -13,9 +13,15 @@ export function checkProductionCsp(html) {
   if (directives.get('connect-src')?.some(source => /^wss?:/.test(source))) throw new Error('Packaged CSP allows WebSocket connections');
 }
 
+export function verifyArchiveCsp(archive) {
+  let html;
+  try { html = asar.extractFile(archive, 'dist/index.html').toString('utf8'); }
+  catch { throw new Error(`Missing dist/index.html in ${archive}`); }
+  checkProductionCsp(html);
+}
+
 export function verifyArchive(archive, root = projectRoot) {
   checkNotices(root);
-  checkProductionCsp(asar.extractFile(archive, 'dist/index.html').toString('utf8'));
   const required = new Map([
     ['LICENSE', 'LICENSE'],
     ['THIRD_PARTY_NOTICES.txt', 'THIRD_PARTY_NOTICES.txt'],
@@ -60,11 +66,12 @@ export default async function afterPack(context) {
   const archives = findArchives(context.appOutDir);
   if (archives.length !== 1) throw new Error(`Expected one app.asar in ${context.appOutDir}, found ${archives.length}`);
   verifyArchive(archives[0]);
+  verifyArchiveCsp(archives[0]);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const target = process.argv[2] ? path.resolve(process.argv[2]) : path.join(projectRoot, 'release');
   const archives = target.endsWith('.asar') ? [target] : findArchives(target);
   if (archives.length === 0) throw new Error(`No app.asar found in ${target}; run npm run package first.`);
-  for (const archive of archives) verifyArchive(archive);
+  for (const archive of archives) { verifyArchive(archive); verifyArchiveCsp(archive); }
 }
