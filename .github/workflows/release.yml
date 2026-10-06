@@ -13,8 +13,8 @@ jobs:
     runs-on: macos-latest
     environment: release
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -39,7 +39,7 @@ jobs:
       - name: Verify signed app
         if: ${{ inputs.signed }}
         run: node scripts/verify-signed-release.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ inputs.signed && 'signed' || 'unsigned' }}
           path: |
@@ -51,8 +51,8 @@ jobs:
     if: ${{ !inputs.signed }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -63,7 +63,7 @@ jobs:
       - run: xvfb-run -a node scripts/test-electron.mjs
         env:
           PRIME_DESKTOP_EXECUTABLE: release/linux-unpacked/session-dock
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-unsigned
           path: |
