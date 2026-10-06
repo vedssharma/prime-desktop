@@ -4,8 +4,18 @@ import { fileURLToPath } from 'node:url';
 import asar from '@electron/asar';
 import { checkNotices, projectRoot } from './generate-notices.mjs';
 
+/** The packaged page must not carry the dev server's relaxations (see vite.config.ts). */
+export function checkProductionCsp(html) {
+  const policy = html.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/)?.[1];
+  if (!policy) throw new Error('Packaged index.html has no Content-Security-Policy');
+  const directives = new Map(policy.split(';').map(part => part.trim().split(/\s+/)).filter(([name]) => name).map(([name, ...values]) => [name, values]));
+  if (directives.get('script-src')?.includes("'unsafe-inline'")) throw new Error("Packaged CSP allows 'unsafe-inline' scripts");
+  if (directives.get('connect-src')?.some(source => /^wss?:/.test(source))) throw new Error('Packaged CSP allows WebSocket connections');
+}
+
 export function verifyArchive(archive, root = projectRoot) {
   checkNotices(root);
+  checkProductionCsp(asar.extractFile(archive, 'dist/index.html').toString('utf8'));
   const required = new Map([
     ['LICENSE', 'LICENSE'],
     ['THIRD_PARTY_NOTICES.txt', 'THIRD_PARTY_NOTICES.txt'],
