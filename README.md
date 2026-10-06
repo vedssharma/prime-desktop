@@ -27,6 +27,7 @@ npm start           # Run the compiled desktop app
 npm run lint        # ESLint (TypeScript and React hooks rules)
 npm run check       # Lint, typecheck and every unit/UI test suite (what CI runs)
 npm test            # Backend unit tests
+npm run test:coverage  # Unit tests with a coverage report (CI publishes it on Linux)
 npm run test:ui     # Browser UI tests with a fake backend
 npm run test:electron  # Native Electron tests with simulated daemons (no LLM requests)
 npm run smoke       # Read-only Electron smoke test against your local CLI

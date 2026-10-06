@@ -20,6 +20,12 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npx playwright install --with-deps chromium
       - run: npm run check
+      - name: Unit test coverage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -o pipefail
+          npm run test:coverage | tee coverage.txt
+          { echo '### Unit test coverage'; echo '```'; sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt | sed 's/^# //'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - run: npm run build
       - name: Native Electron (macOS)
         if: runner.os == 'macOS'
