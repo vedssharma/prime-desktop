@@ -260,3 +260,31 @@ or provider prompts. It verified unchanged source bytes during a fork from close
 history, distinct fork identity and parent, exact resume identity, denial of peer
 navigation, concurrent-resume rejection, and successful EOF cleanup. This validates
 ownership/lifecycle, not provider inference or a packaged native CLI distribution.
+
+## Source review of 0.9.7 and 0.9.8 (probe pending)
+
+Upstream released `v0.9.7` (2026-09-28) and `v0.9.8` (2026-09-29). Neither is in
+`VERIFIED_OWNED_VERSIONS` yet: the native probe below has not been run against them.
+A source comparison of `v0.9.6` against both tags found nothing that changes the
+boundary described above:
+
+- `src/modes/rpc/`, `src/modes/agent-connection/`, `docs/rpc.md`, `docs/daemon.md` and
+  `docs/agent-connection.md` are byte-identical across the three tags.
+- `DAEMON_PROTOCOL_VERSION` is still 7. The supervisor's command allowlist moved from a
+  literal set in `daemon-supervisor.ts` to `DAEMON_COMMAND_TYPES`, derived from
+  `DAEMON_COMMAND_COMPATIBILITY` in `daemon-protocol.ts`; the 107 command names are the
+  same. Workers now reject supervisor-only commands such as `promote_owned_session`.
+- `findWorkerForClient`, `isWorkerAccessibleToClient`, `assertWorkerCreateOwner` and
+  `attachClient` are unchanged. No change touches `PRIME_AGENT_INTERNAL_*` handling
+  beyond removing an unused parameter in `owned-session-worker.ts`.
+- The rest of the diff removes dead exports (`findMostRecentSession`,
+  `shouldUseDaemonInteractive`, unused protocol type aliases) and changes TUI code.
+
+To finish verification on a machine with the release installed:
+
+```text
+PRIME_PROBE_VERSION=0.9.8 npm run test:real-owned -- "$(command -v prime-agent)"
+```
+
+If it passes, add the version to `electron/cli-versions.ts` and update the version
+mentions in the README. Repeat with 0.9.7 if anyone still runs it.

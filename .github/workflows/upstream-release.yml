@@ -1,0 +1,36 @@
+name: Prime Agent release check
+# Opens an issue when upstream ships a stable release that electron/cli-versions.ts
+# has not verified yet, so desktop-owned sessions don't silently stop working.
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the latest stable release with the verified list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(git ls-remote --tags --refs https://github.com/PrimeIntellect-ai/prime-agent.git \
+            | sed -n 's#.*refs/tags/v\([0-9]*\.[0-9]*\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
+          if [ -z "$latest" ]; then echo "No stable release tags found"; exit 1; fi
+          if grep -q "'$latest'" electron/cli-versions.ts; then
+            echo "Prime Agent $latest is already verified."
+            exit 0
+          fi
+          title="Verify Prime Agent $latest for desktop-owned sessions"
+          if gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number' | grep -q .; then
+            echo "Issue already open for $latest."
+            exit 0
+          fi
+          gh issue create --title "$title" --body "Prime Agent $latest is released but not in \`VERIFIED_OWNED_VERSIONS\` (\`electron/cli-versions.ts\`). Users who upgrade lose desktop-owned sessions until it is verified.
+
+          1. Review upstream RPC and ownership changes since the last verified version, as \`docs/owned-rpc-design.md\` describes.
+          2. Run \`PRIME_PROBE_VERSION=$latest npm run test:real-owned -- \"\$(command -v prime-agent)\"\` against the installed release.
+          3. If both pass, add the version to \`electron/cli-versions.ts\` and update the README."
