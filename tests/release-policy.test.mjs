@@ -5,7 +5,7 @@ test('unsigned releases cannot inherit signing identities or notarization creden
   const input = { PATH: '/bin', CSC_NAME: 'Developer', CSC_LINK: 'secret', CSC_KEY_PASSWORD: 'secret', APPLE_ID: 'secret', APPLE_API_KEY: 'secret', WIN_CSC_LINK: 'secret' };
   const policy = releasePolicy(false, 'darwin', input);
   assert.deepEqual(policy.env, { PATH: '/bin', CSC_IDENTITY_AUTO_DISCOVERY: 'false' });
-  assert(policy.args.includes('--config.mac.identity=null')); assert(policy.args.includes('--config.mac.notarize=false'));
+  assert(policy.args.includes('--config.mac.identity=-')); assert(policy.args.includes('--config.mac.hardenedRuntime=false')); assert(policy.args.includes('--config.mac.notarize=false'));
   assert.equal(input.CSC_NAME, 'Developer');
 });
 test('signed releases require credentials and override disabled discovery', () => {
@@ -23,4 +23,13 @@ test('Linux releases are unsigned only and strip every signing and notarization 
     const env = { CSC_LINK: 'c', CSC_KEY_PASSWORD: 'p', APPLE_ID: 'i', APPLE_APP_SPECIFIC_PASSWORD: 'p', APPLE_TEAM_ID: 't', [key]: '' };
     assert.throws(() => releasePolicy(true, 'darwin', env), new RegExp(`requires ${key}`));
   }
+});
+test('release tags must match the package version, and prereleases are recognized', async () => {
+  const { checkReleaseTag } = await import('../scripts/release-tag.mjs');
+  assert.deepEqual(checkReleaseTag('v0.2.0', '0.2.0'), { version: '0.2.0', prerelease: false });
+  assert.deepEqual(checkReleaseTag('v1.0.0-beta.1', '1.0.0-beta.1'), { version: '1.0.0-beta.1', prerelease: true });
+  assert.throws(() => checkReleaseTag('v0.2.1', '0.2.0'), /tag the release as v0\.2\.0/);
+  assert.throws(() => checkReleaseTag('0.2.0', '0.2.0'), /does not match/);
+  assert.throws(() => checkReleaseTag('v0.2', '0.2'), /not a release version/);
+  assert.throws(() => checkReleaseTag('v', undefined), /not a release version/);
 });

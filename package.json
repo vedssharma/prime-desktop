@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
+  "desktopName": "session-dock.desktop",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --host 127.0.0.1",
@@ -83,8 +84,13 @@
     },
     "linux": {
       "target": [
-        "AppImage"
-      ]
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "maintainer": "Ved Sharma <114942578+vedssharma@users.noreply.github.com>",
+      "synopsis": "Unofficial desktop companion for Prime Agent CLI",
+      "syncDesktopName": true
     },
     "icon": "build/icon.png",
     "npmRebuild": false,
@@ -98,7 +104,8 @@
         "to": "licenses/LICENSES.chromium.html"
       }
     ],
-    "afterPack": "./scripts/check-package.mjs"
+    "afterPack": "./scripts/check-package.mjs",
+    "artifactName": "Session-Dock-${version}-${os}-${arch}.${ext}"
   },
   "license": "MIT",
   "author": "Ved Sharma",
