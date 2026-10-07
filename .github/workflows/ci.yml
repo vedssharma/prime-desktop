@@ -48,6 +48,9 @@ jobs:
       - run: npx electron-builder --dir $(node --input-type=module -e "import { releasePolicy } from './scripts/release-policy.mjs'; console.log(releasePolicy(false, process.platform, {}).args.join(' '))")
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # electron-builder skips all signing on pull_request builds, ad-hoc included, which
+          # leaves a broken signature. This job has no signing secrets, so signing ad-hoc is safe.
+          CSC_FOR_PULL_REQUEST: 'true'
       - run: npm run package:check
       - name: Packaged unsigned app is ad-hoc signed and launches (macOS)
         if: runner.os == 'macOS'
