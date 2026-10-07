@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, copyFile, chmod, mkdir, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, copyFile, chmod, mkdir, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PrimeService, type SessionEvent } from '../electron/prime.js';
@@ -288,6 +288,22 @@ test('earlier-message fork uses a private snapshot and preserves the complete so
   await assert.rejects(service.forkOwnedSession(original.id,true,'absent'),/Select/);
   await service.sendMessage(fork.id,'Independent continuation');
   assert.equal((await service.getMessages(original.id)).length,2);
+ });
+});
+
+test('a fork whose CLI fails to start removes its private snapshot and leaves the source intact', async () => {
+ await ownedFixture(async(service,dir)=>{
+  const original=await service.createSession({cwd:dir,prompt:'First message',allowFileChanges:true});
+  await service.sendMessage(original.id,'Later message');
+  await service.closeOwnedSession(original.id);
+  const messages=await service.getMessages(original.id);
+  const cli=join(dir,'prime-agent');
+  await writeFile(cli,"#!/bin/sh\nexit 3\n");
+  await assert.rejects(service.forkOwnedSession(original.id,true,messages[0].id));
+  const transcripts=join(dir,'desktop','transcripts');
+  assert.deepEqual((await readdir(transcripts)).filter(name=>name.startsWith('.fork-source-')),[]);
+  assert.equal((await service.getMessages(original.id)).length,2);
+  assert.equal(await service.hasOpenOwnedSessions(),false);
  });
 });
 

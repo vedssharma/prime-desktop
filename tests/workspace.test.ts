@@ -85,6 +85,10 @@ test('git changes and diffs cover modified, untracked and pre-commit repositorie
     const modified = await workspaceDiff(root, 'src/a.ts');
     assert.match(modified.diff, /-export const a = 1;/); assert.match(modified.diff, /\+export const a = 2;/);
     assert.match((await workspaceDiff(root, 'fresh.txt')).diff, /\+brand new/);
+    // An empty untracked file is still shown as new; a path that does not exist is an error, not an empty diff.
+    await writeFile(path.join(root, 'empty.txt'), '');
+    assert.match((await workspaceDiff(root, 'empty.txt')).diff, /new file mode/);
+    await assert.rejects(workspaceDiff(root, 'missing.txt'));
     await assert.rejects(workspaceDiff(root, '../x'), /Invalid/);
   } finally { await cleanup(); }
 });

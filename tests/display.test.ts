@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DISPLAY_KEY, loadDisplay } from '../src/DisplaySettings.js';
+import { DISPLAY_KEY, applyDisplay, loadDisplay } from '../src/DisplaySettings.js';
 
 test('display preferences are allowlisted and fall back when storage is invalid or blocked', () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -21,5 +21,20 @@ test('display preferences are allowlisted and fall back when storage is invalid 
   } finally {
     if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
     else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
+
+test('display preferences are applied as root data attributes for the stylesheet', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const dataset: Record<string, string> = {};
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { documentElement: { dataset } } });
+  try {
+    applyDisplay({ textSize: 'large', density: 'compact' });
+    assert.deepEqual(dataset, { textSize: 'large', density: 'compact' });
+    applyDisplay({ textSize: 'standard', density: 'comfortable' });
+    assert.deepEqual(dataset, { textSize: 'standard', density: 'comfortable' });
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, 'document', descriptor);
+    else Reflect.deleteProperty(globalThis, 'document');
   }
 });
