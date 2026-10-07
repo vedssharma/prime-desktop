@@ -1,5 +1,10 @@
 name: Release artifacts
+# Pushing a tag such as v0.2.0 (matching package.json) builds, tests and packages the
+# installers, then attaches them to a DRAFT GitHub release for review. Publishing the draft
+# is a manual step. A manual dispatch builds the same artifacts without creating a release.
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       signed:
@@ -9,7 +14,19 @@ on:
 permissions:
   contents: read
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag matches package.json
+        id: check
+        if: github.event_name == 'push'
+        run: node scripts/release-tag.mjs "$GITHUB_REF_NAME"
   macos:
+    needs: version
     runs-on: macos-latest
     environment: release
     steps:
@@ -33,6 +50,9 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - run: npm run package:check
+      - name: Unsigned app carries a valid ad-hoc signature
+        if: ${{ !inputs.signed }}
+        run: codesign --verify --deep --strict --verbose=2 "release/mac-arm64/Session Dock.app"
       - run: node scripts/test-electron.mjs
         env:
           PRIME_DESKTOP_EXECUTABLE: release/mac-arm64/Session Dock.app/Contents/MacOS/Session Dock
@@ -48,6 +68,7 @@ jobs:
             release/SHA256SUMS
             release/SIGNING_VERIFICATION.json
   linux:
+    needs: version
     if: ${{ !inputs.signed }}
     runs-on: ubuntu-latest
     steps:
@@ -68,4 +89,33 @@ jobs:
           name: linux-unsigned
           path: |
             release/*.AppImage
+            release/*.deb
             release/SHA256SUMS
+  draft-release:
+    if: github.event_name == 'push'
+    needs: [version, macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist-release
+          merge-multiple: true
+      - name: Combined checksums
+        working-directory: dist-release
+        run: |
+          rm -f SHA256SUMS
+          sha256sum *.dmg *.zip *.AppImage *.deb > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          sed "s/{{VERSION}}/$VERSION/g" docs/release-notes.md > notes.md
+          flags=(--draft --verify-tag --title "Session Dock $VERSION" --notes-file notes.md --generate-notes)
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" dist-release/*.dmg dist-release/*.zip dist-release/*.AppImage dist-release/*.deb dist-release/SHA256SUMS

@@ -9,5 +9,9 @@ export function releasePolicy(signed, platform, source) {
   }
   for (const key of Object.keys(env)) if (/^(?:CSC_|WIN_CSC_|APPLE_|NOTARIZE_)/.test(key)) delete env[key];
   env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
-  return { env, args: platform === 'darwin' ? ['--config.mac.identity=null', '--config.mac.notarize=false', '--config.forceCodeSigning=false'] : ['--config.forceCodeSigning=false'] };
+  // Unsigned macOS builds are still ad-hoc signed: Apple Silicon refuses to run a modified bundle
+  // whose signature is broken, and a downloaded one is reported as "damaged" with no way to open it.
+  // Ad-hoc signing carries no identity, so Gatekeeper offers Open Anyway instead. Hardened runtime
+  // stays off because its library validation rejects Electron's frameworks under an ad-hoc signature.
+  return { env, args: platform === 'darwin' ? ['--config.mac.identity=-', '--config.mac.hardenedRuntime=false', '--config.mac.notarize=false', '--config.forceCodeSigning=false'] : ['--config.forceCodeSigning=false'] };
 }

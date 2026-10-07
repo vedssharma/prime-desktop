@@ -8,6 +8,26 @@ An unofficial, community-built desktop companion for [Prime Agent](https://githu
 
 > **Two session modes:** With verified Prime Agent **0.9.6**, new desktop-owned sessions can accept prompts, run tools, change files, stop, and switch models through an owned RPC connection. Existing shared CLI sessions remain read-only. This is control-routing isolation, **not a filesystem sandbox**. See [owned-session design](docs/owned-rpc-design.md). Other CLI versions do not enable desktop-owned writes until reviewed.
 
+## Install
+
+Download the latest version from [Releases](https://github.com/vedssharma/prime-desktop/releases/latest). Session Dock needs the Prime Agent CLI: install it, run `prime-agent` once, and use `/login` and `/model` to set up a provider before opening the app.
+
+| Platform | File |
+| --- | --- |
+| macOS, Apple Silicon | `Session-Dock-<version>-mac-arm64.dmg` |
+| Ubuntu / Debian (x64) | `Session-Dock-<version>-linux-amd64.deb` |
+| Other Linux (x64) | `Session-Dock-<version>-linux-x86_64.AppImage` |
+
+Intel Macs and Windows are not supported yet.
+
+**macOS.** Open the DMG and drag Session Dock into Applications. Builds are not signed with an Apple Developer ID yet, so the first launch is blocked with a message that Apple could not verify the app. Open **System Settings → Privacy & Security**, scroll to the message about Session Dock and click **Open Anyway**, then confirm. (On macOS 14 and earlier you can instead Control-click the app in Applications and choose **Open**.) Later launches open normally. Do not turn off Gatekeeper to do this.
+
+**Ubuntu / Debian.** Install the package with `sudo apt install ./Session-Dock-<version>-linux-amd64.deb`, then start Session Dock from your applications menu. The package installs an AppArmor profile so Electron's sandbox works on Ubuntu 24.04.
+
+**Other Linux.** Make the AppImage executable (`chmod +x Session-Dock-*.AppImage`) and run it. AppImages need FUSE 2 (`libfuse2` or `libfuse2t64` on Ubuntu-based systems).
+
+**Check a download.** Each release includes `SHA256SUMS`. Run `shasum -a 256 <file>` on macOS or `sha256sum <file>` on Linux and compare the result with the matching line.
+
 ## Run locally
 
 Requirements: Node.js 22.12+ (or a current supported Node.js release), npm, and an installed, configured `prime-agent` CLI.
@@ -41,7 +61,7 @@ The browser preview deliberately has no access to the daemon. Use the Electron a
 
 ## macOS build
 
-An unsigned Apple Silicon app is generated at `release/mac-arm64/Session Dock.app`. Open it with:
+A local Apple Silicon build is generated at `release/mac-arm64/Session Dock.app`. Open it with:
 
 ```sh
 open "release/mac-arm64/Session Dock.app"
@@ -162,10 +182,11 @@ is a separate project and must be installed independently.
 
 ## Release builds
 
-See [docs/releases.md](docs/releases.md) for architecture-specific app paths, native
-validation, checksum generation, and optional signing/notarization. Signing requires
-private credentials and has not been validated locally. Manual CI builds produce
-reviewable artifacts, not automatic public releases.
+To ship a version, set it in `package.json` and push a matching tag (`v0.2.0`). CI tests
+and packages the installers and attaches them to a draft GitHub release; nothing is public
+until you publish that draft. See [docs/releases.md](docs/releases.md) for the full steps,
+architecture-specific app paths, native validation, checksums and optional
+signing/notarization. Signing requires private credentials and has not been validated.
 
 ## Providers and model selection
 
