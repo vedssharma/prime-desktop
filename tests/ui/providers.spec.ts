@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import type { ModelOption } from '../../shared/types';
 
 // Start from the real browser fallback. Only model discovery and clipboard calls

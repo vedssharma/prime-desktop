@@ -1,16 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DRAFTS_KEY, KEEP_DRAFTS_KEY, loadKeepDrafts, loadSavedDrafts, saveDrafts, saveKeepDrafts } from '../src/drafts.js';
-
-function withStorage(run: (store: Map<string, string>) => void, failing = false) {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-  const store = new Map<string, string>();
-  const fail = () => { throw new Error('blocked'); };
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: failing ? { getItem: fail, setItem: fail, removeItem: fail } : {
-    getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); }, removeItem: (key: string) => { store.delete(key); },
-  } });
-  try { run(store); } finally { if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor); else delete (globalThis as { localStorage?: unknown }).localStorage; }
-}
+import { withStorage } from './storage.js';
 
 test('keeping drafts is off by default, and turning it off deletes saved text', () => withStorage(store => {
   assert.equal(loadKeepDrafts(), false);

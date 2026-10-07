@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 // Keep mutation responses under test control. No network or wall-clock sleeps.
 async function openApp(page: Page, running = false) {

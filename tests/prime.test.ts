@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, mkdtemp, mkdir, chmod, rm } from 'node:fs/promises';
+import { writeFile, readFile, mkdtemp, mkdir, chmod, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PrimeService, normalizeMessages, normalizeSession, parseSavedTranscript } from '../electron/prime.js';
@@ -268,4 +268,56 @@ test('conversation search matches saved text case-insensitively with excerpts an
     assert.deepEqual(await service.searchSessions(' f '), [], 'single characters are not searched');
     assert.deepEqual(await service.searchSessions('absent phrase'), []);
   } finally { service.close(); await daemon.close(); }
+});
+
+test('reconnect starts the CLI daemon only when explicitly allowed and the socket is absent', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'connect-'));
+  const socketPath = join(dir, 'daemon.sock');
+  const log = join(dir, 'launches.log');
+  // A stand-in CLI that records each launch and serves a daemon handshake on the requested socket.
+  const cli = join(dir, 'prime-agent');
+  await writeFile(cli, `#!${process.execPath}
+const { appendFileSync } = require('node:fs'); const { createServer } = require('node:net');
+const args = process.argv.slice(2); appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n');
+if (args[0] === '--version') { console.log('0.9.5'); process.exit(0); }
+if (args.includes('--no-listen')) process.exit(0);
+const server = createServer(socket => socket.write(JSON.stringify({ type: 'daemon_hello', protocol: { name: 'prime-agent.daemon', version: 7 }, schemaRevision: 28, version: '0.9.5', appVersion: 'spawned' }) + '\\n'));
+server.listen(args[args.indexOf('--daemon-socket') + 1]);
+setTimeout(() => process.exit(0), 5000);
+`);
+  await chmod(cli, 0o700);
+  const launches = async () => (await readFile(log, 'utf8').catch(() => '')).split('\n').filter(line => line.startsWith('--mode'));
+  try {
+    const readOnly = new PrimeService({ socketPath, home: dir, executable: cli, readOnly: true });
+    try { const result = await readOnly.connect(); assert.equal(result.connected, false); assert.match(result.error ?? '', /ENOENT/); } finally { readOnly.close(); }
+    assert.deepEqual(await launches(), [], 'read-only mode never starts a daemon');
+
+    const missing = new PrimeService({ socketPath, home: dir, executable: join(dir, 'absent-cli') });
+    try { assert.match((await missing.connect()).error ?? '', /^Could not start Prime Agent: .*ENOENT.*Install the CLI/); } finally { missing.close(); }
+
+    const service = new PrimeService({ socketPath, home: dir, executable: cli });
+    try {
+      const result = await service.connect();
+      assert.equal(result.connected, true); assert.equal('version' in result && result.version, 'spawned');
+      assert.deepEqual(await launches(), [`--mode daemon --daemon-socket ${socketPath}`]);
+      assert.equal((await service.connect()).connected, true);
+      assert.equal((await launches()).length, 1, 'an existing connection is reused, not relaunched');
+    } finally { service.close(); }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('reconnect gives up when the launched CLI never serves the socket, and other errors are not retried by launching', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'connect-'));
+  const cli = join(dir, 'prime-agent');
+  await writeFile(cli, `#!${process.execPath}\nif (process.argv[2] === '--version') console.log('0.9.5');\n`);
+  await chmod(cli, 0o700);
+  const service = new PrimeService({ socketPath: join(dir, 'daemon.sock'), home: dir, executable: cli });
+  // A daemon that answers with an unsupported protocol is a real failure, not a missing daemon.
+  const daemon = await fakeDaemon(undefined, { protocol: { name: 'prime-agent.daemon', version: 6 } });
+  const blocked = new PrimeService({ socketPath: daemon.socketPath, home: dir, executable: join(dir, 'absent-cli') });
+  try {
+    assert.equal((await service.connect()).error, 'Could not connect. Run prime-agent in a terminal, then reconnect.');
+    const result = await blocked.connect();
+    assert.equal(result.connected, false); assert.match(result.error ?? '', /Unsupported Prime Agent daemon protocol 6/);
+  } finally { service.close(); blocked.close(); await daemon.close(); await rm(dir, { recursive: true, force: true }); }
 });
