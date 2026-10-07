@@ -17,7 +17,7 @@ test('signed releases require credentials and override disabled discovery', () =
 test('Linux releases are unsigned only and strip every signing and notarization variable', () => {
   const policy = releasePolicy(false, 'linux', { PATH: '/bin', CSC_LINK: 'secret', WIN_CSC_KEY_PASSWORD: 'secret', APPLE_TEAM_ID: 'team', NOTARIZE_TOOL: 'x', MY_CSC_LINK: 'kept' });
   assert.deepEqual(policy.env, { PATH: '/bin', MY_CSC_LINK: 'kept', CSC_IDENTITY_AUTO_DISCOVERY: 'false' });
-  assert.deepEqual(policy.args, ['--config.forceCodeSigning=false']);
+  assert.deepEqual(policy.args, ['--publish', 'never', '--config.forceCodeSigning=false']);
   assert.throws(() => releasePolicy(true, 'linux', { CSC_LINK: 'c', CSC_KEY_PASSWORD: 'p', APPLE_ID: 'i', APPLE_APP_SPECIFIC_PASSWORD: 'p', APPLE_TEAM_ID: 't' }), /macOS only/);
   for (const key of ['CSC_KEY_PASSWORD', 'APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID']) {
     const env = { CSC_LINK: 'c', CSC_KEY_PASSWORD: 'p', APPLE_ID: 'i', APPLE_APP_SPECIFIC_PASSWORD: 'p', APPLE_TEAM_ID: 't', [key]: '' };
@@ -32,4 +32,9 @@ test('release tags must match the package version, and prereleases are recognize
   assert.throws(() => checkReleaseTag('0.2.0', '0.2.0'), /does not match/);
   assert.throws(() => checkReleaseTag('v0.2', '0.2'), /not a release version/);
   assert.throws(() => checkReleaseTag('v', undefined), /not a release version/);
+});
+test('release builds never publish on their own, even on a tag build', () => {
+  // electron-builder publishes implicitly when CI builds a tag; the workflow's draft-release job publishes instead.
+  const policies = [releasePolicy(false, 'darwin', {}), releasePolicy(false, 'linux', {}), releasePolicy(true, 'darwin', { CSC_LINK: 'x', CSC_KEY_PASSWORD: 'x', APPLE_ID: 'x', APPLE_APP_SPECIFIC_PASSWORD: 'x', APPLE_TEAM_ID: 'x' })];
+  for (const { args } of policies) assert.deepEqual(args.slice(0, 2), ['--publish', 'never']);
 });
