@@ -76,7 +76,13 @@ that fails them.
    installer, a combined `SHA256SUMS`, install notes from `docs/release-notes.md` and
    generated change notes.
 4. Review the draft on GitHub (download and open at least one installer), then click
-   **Publish release**. Users get it from the Releases page and the README's Install section.
+   **Publish release**. Users get it from the Releases page, the README's Install section and
+   the download page.
+
+The download page (`site/`, deployed to GitHub Pages by the `Pages` workflow) reads the
+latest published release from the GitHub API when it loads, so it needs no change per
+release. If installer names change, update `ASSET_SUFFIXES` in `site/downloads.js`;
+`tests/site.test.mjs` fails until you do.
 
 To redo a release before publishing, delete the draft and the tag
 (`git push --delete origin v0.2.0`), fix, and tag again.

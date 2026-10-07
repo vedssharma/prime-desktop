@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Session Dock</title>
+  <meta name="description" content="Session Dock is an unofficial desktop companion for the Prime Agent CLI. Download it for macOS and Linux.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="downloads.js"></script>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <img src="icon.svg" alt="" width="96" height="96">
+      <h1>Session Dock</h1>
+      <p class="tagline">A desktop companion for the <a href="https://github.com/PrimeIntellect-ai/prime-agent">Prime Agent</a> CLI. Browse your sessions, follow agents as they work, and run new sessions from a native window.</p>
+      <p class="meta">Latest release: <a data-version href="https://github.com/vedssharma/prime-desktop/releases/latest">see GitHub</a> · Free and open source (MIT)</p>
+    </header>
+
+    <section class="downloads" aria-labelledby="download-heading">
+      <h2 id="download-heading">Download</h2>
+      <div class="cards">
+        <article class="card" data-platform="mac">
+          <h3>macOS</h3>
+          <p class="requirement">Apple Silicon (M1 or later)</p>
+          <a class="button primary" data-asset="mac-dmg" href="https://github.com/vedssharma/prime-desktop/releases/latest">Download .dmg <span data-size></span></a>
+          <a class="alt" data-asset="mac-zip" href="https://github.com/vedssharma/prime-desktop/releases/latest">or the .zip</a>
+        </article>
+        <article class="card" data-platform="linux">
+          <h3>Linux</h3>
+          <p class="requirement">x64</p>
+          <a class="button primary" data-asset="deb" href="https://github.com/vedssharma/prime-desktop/releases/latest">Ubuntu / Debian .deb <span data-size></span></a>
+          <a class="button" data-asset="appimage" href="https://github.com/vedssharma/prime-desktop/releases/latest">AppImage <span data-size></span></a>
+        </article>
+      </div>
+      <p class="note">Intel Macs and Windows are not supported yet. <a href="https://github.com/vedssharma/prime-desktop/releases">All releases</a></p>
+    </section>
+
+    <section aria-labelledby="before-heading">
+      <h2 id="before-heading">Before you start</h2>
+      <p>Session Dock uses your Prime Agent sessions, credentials and models. Install the <a href="https://github.com/PrimeIntellect-ai/prime-agent">Prime Agent CLI</a>, run <code>prime-agent</code> once, and use <code>/login</code> and <code>/model</code> to set up a provider before opening the app.</p>
+    </section>
+
+    <section aria-labelledby="install-heading">
+      <h2 id="install-heading">Install</h2>
+      <h3>macOS</h3>
+      <p>Open the DMG and drag Session Dock into Applications. The app is not signed with an Apple Developer ID yet, so the first launch is blocked with a message that Apple could not verify it. To open it:</p>
+      <ol>
+        <li>Open <strong>System Settings → Privacy &amp; Security</strong>.</li>
+        <li>Scroll to the message about Session Dock and click <strong>Open Anyway</strong>, then confirm.</li>
+      </ol>
+      <p>On macOS 14 and earlier you can instead Control-click the app in Applications and choose <strong>Open</strong>. Later launches open normally. You do not need to turn off Gatekeeper.</p>
+      <h3>Ubuntu / Debian</h3>
+      <pre><code>sudo apt install ./Session-Dock-*-linux-amd64.deb</code></pre>
+      <p>Then start Session Dock from your applications menu.</p>
+      <h3>Other Linux</h3>
+      <pre><code>chmod +x Session-Dock-*.AppImage
+./Session-Dock-*.AppImage</code></pre>
+      <p>AppImages need FUSE 2 (<code>libfuse2</code> or <code>libfuse2t64</code> on Ubuntu-based systems).</p>
+      <h3>Check a download</h3>
+      <p>Compare <code>shasum -a 256 &lt;file&gt;</code> (macOS) or <code>sha256sum &lt;file&gt;</code> (Linux) with the matching line in <a data-asset="sums" href="https://github.com/vedssharma/prime-desktop/releases/latest">SHA256SUMS</a>.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p><a href="https://github.com/vedssharma/prime-desktop">Source on GitHub</a> · <a href="https://github.com/vedssharma/prime-desktop/issues">Report an issue</a></p>
+    <p>Session Dock is a community project, not affiliated with or endorsed by Prime Intellect.</p>
+  </footer>
+</body>
+</html>
