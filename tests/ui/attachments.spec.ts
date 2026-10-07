@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
 const image = {type:'image',mimeType:'image/png',data};
 const file = (name = 'example.png') => ({name,mimeType:'image/png',buffer:Buffer.from(data,'base64')});

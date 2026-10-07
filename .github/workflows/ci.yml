@@ -20,12 +20,23 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npx playwright install --with-deps chromium
       - run: npm run check
+        env:
+          # Linux also records which app code the UI tests ran (Chromium V8 coverage).
+          UI_COVERAGE_DIR: ${{ runner.os == 'Linux' && 'coverage/ui-raw' || '' }}
       - name: Unit test coverage (Linux)
         if: runner.os == 'Linux'
         run: |
           set -o pipefail
           npm run test:coverage | tee coverage.txt
           { echo '### Unit test coverage'; echo '```'; sed -n '/start of coverage report/,/end of coverage report/p' coverage.txt | sed 's/^# //'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: UI test coverage (Linux)
+        if: runner.os == 'Linux'
+        env:
+          UI_COVERAGE_DIR: coverage/ui-raw
+        run: |
+          set -o pipefail
+          node scripts/ui-coverage.mjs --report-only | tee ui-coverage.txt
+          { echo '### UI test coverage'; echo '```'; sed -n '/┌/,/┘/p' ui-coverage.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - run: npm run build
       - name: Native Electron (macOS)
         if: runner.os == 'macOS'

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 const appearanceKey = 'session-dock.appearance.v1';
 const preferencesKey = 'prime-desktop.preferences.v1';

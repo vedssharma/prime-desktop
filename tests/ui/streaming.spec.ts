@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 
 // Pushed events are delivered by the test through window.__emit, the same shape the preload forwards.
 test.beforeEach(async ({ page }) => {
